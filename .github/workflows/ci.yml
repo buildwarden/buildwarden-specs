@@ -1,0 +1,24 @@
+name: ci
+
+# Everything ci checks is `make check`, so a checkout runs exactly what this
+# workflow runs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: conformance/go.mod
+      - run: make check

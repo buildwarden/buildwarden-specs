@@ -1,0 +1,19 @@
+go 1.26.3
+
+use (
+	./bootstrap-config
+	./collector-inputs
+	./collector-outputs
+	./conformance
+	./executor-initialize
+	./relay-claim
+	./relay-guest-api
+)
+
+// The harness version in progress, which is the version at the head of
+// conformance/CHANGELOG.md. A specification's go.mod names the harness version
+// it will be released with, which has no tag until the release, so the
+// workspace builds every specification against this tree's harness. The line
+// must name the version: a pull request that raises the harness's version
+// edits it too, and ci checks the two agree.
+replace github.com/buildwarden/buildwarden-specs/conformance v0.1.0 => ./conformance
