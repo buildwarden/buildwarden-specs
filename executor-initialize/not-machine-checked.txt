@@ -1,0 +1,3 @@
+# The requirements of executor-initialize/v1.md that no case checks, one to a line: the
+# identifier, a space and the reason (see the README's conventions). The
+# specification has no suite yet, so every requirement is listed here.

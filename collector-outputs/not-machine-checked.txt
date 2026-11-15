@@ -1,0 +1,2 @@
+# The requirements of collector-outputs/v1.md that no case of its suite checks, one to a
+# line: the identifier, a space and the reason (see the README's conventions).

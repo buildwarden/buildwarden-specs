@@ -45,6 +45,52 @@ name `driver-contract/` is reserved for the driver contract (seam 9).
 | The disk collector, `cmd/collector` | [buildwarden/buildwarden](https://github.com/buildwarden/buildwarden) | `collector-outputs` and `collector-inputs` (collector), `bootstrap-config` (producer), `relay-claim` (claimant) |
 | The executor, `cmd/warden-io` | [buildwarden/buildwarden](https://github.com/buildwarden/buildwarden) | `executor-initialize`, `bootstrap-config` (reader) |
 
+## Conventions
+
+These hold in every specification directory.
+
+- **The document.** `v<N>.md` is version `N` of the protocol or format. Every
+  document has the same sections, in this order: Scope and roles; Transport;
+  Messages and fields; Ordering; Errors; Limits; Versioning; Conformance; and
+  Known divergences, where what the reference implementation does differs from
+  a rule or a comment of its own repository. Its header links the book's page
+  for the concept and names the reference implementation.
+- **Requirements.** Each normative statement uses the RFC 2119 words and is
+  numbered. Its identifier is the specification's prefix, a hyphen and a
+  decimal number with no leading zero: `CLAIM-7`. A requirement is stated in
+  a paragraph or a list item that starts with its identifier in bold followed
+  by a full stop, `**CLAIM-7.** The relay MUST ...`; an identifier elsewhere
+  in the text, or inside a code block, refers to one and states nothing. An
+  identifier is unique in its document and is never given to another
+  requirement, also after the one it named is removed. A document states only
+  requirements with its own prefix, and names another specification by its
+  directory and section.
+- **Requirements that no case checks** are listed in the directory's
+  `not-machine-checked.txt`, one to a line: the identifier, a space and the
+  reason. Blank lines and lines that start with `#` are ignored. Every
+  requirement is cited by a case of the directory's own suite or listed
+  there.
+- **Cases.** A suite is the package `cases/` of its directory's module, which
+  exports its cases as `Cases`. Each case is a `runner.Case` of the harness and
+  names, in its `Cites` field, the requirements it checks, which are its own
+  specification's only. `executor-initialize` has no suite yet: its cases are
+  for the item that changes the executor's `initialize`, and every one of its
+  requirements is on its list.
+- **The directory's package.** The Go package at the root of each directory
+  embeds the document with its schemas and OpenAPI descriptions (`v1*`), the
+  `CHANGELOG.md` and the list, so that a command built with `go install`
+  carries them.
+- **The command.** `cmd/bw-conformance-<directory>` runs the suite.
+  `run -target <file>` runs it against the component a target file describes,
+  `requirements` lists each requirement with the cases that cite it or the
+  reason it has none, and `version` prints the specification's version, the
+  harness's, and the specification versions the harness's models were written
+  from.
+- **Versions.** Each directory's `CHANGELOG.md` starts with the version its
+  next release will be, `## vX.Y.Z`, newest first; a pull request that changes
+  a directory adds that version. The command reads its version from there. A
+  specification's `go.mod` names the harness version it is released with.
+
 ## Working here
 
 The seven modules form one workspace, `go.work`, whose `replace` line names
