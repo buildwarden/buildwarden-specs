@@ -14,53 +14,80 @@ import (
 	"github.com/buildwarden/buildwarden-specs/conformance/upstream"
 )
 
-// The address and name at which collectorAtURL serves the harness's
-// collector on the upstream, and an address on the upstream at which
-// nothing listens.
+// The address at which collectorAtURL serves the harness's collector on
+// the upstream, and an address on the upstream at which nothing listens.
 var (
 	collectorAddr = netip.MustParseAddr("192.0.2.70")
 	nobodyAddr    = netip.MustParseAddr("192.0.2.71")
 )
 
-const collectorName = "collector.example"
-
-// collectorAtURL claims a fresh relay with a collector_url that is not the
-// tunnel: a name the claim's one resolver answers with an address of the
-// upstream, where the harness's collector serves, written with a trailing
-// slash. No tunnel is opened.
-var collectorAtURL = runner.Case{
-	Name:  "a collector_url that is not the tunnel is a base URL the relay requests itself",
-	Cites: []string{"CLAIM-23", "CLAIM-31"},
-	Role:  "relay",
-	Ends:  true,
-	Run: func(t *runner.T) {
-		r := startRelay(t, attach.Params{})
-		r.up.Resolvers[0].Set(collectorName, collectorAddr)
-		coll := collector.New(collector.Form{}, nil)
-		l, err := t.Network(attach.Upstream).Listen(t.Context(), "tcp", netip.AddrPortFrom(collectorAddr, 80).String())
-		if err != nil {
-			t.Fatalf("the collector's listener: %v", err)
+// collectorAtURL is a case for each of two collector_urls that are not the
+// tunnel, each written with a trailing slash: one for a name of its own,
+// and http://collector.tunnel/, which differs from the tunnel's value by its
+// slash alone (CLAIM-22). Each claims a fresh relay whose claim's one
+// resolver answers the URL's name with an address of the upstream, where the
+// harness's collector serves. For http://collector.tunnel/ a tunnel is open
+// too, serving a second collector, which must receive nothing.
+func collectorAtURL() []runner.Case {
+	var out []runner.Case
+	for _, v := range []struct {
+		name   string
+		tunnel bool
+	}{
+		{"collector.example", false},
+		{"collector.tunnel", true},
+	} {
+		url := "http://" + v.name + "/"
+		with := "no tunnel open"
+		if v.tunnel {
+			with = "a tunnel open"
 		}
-		t.Cleanup(func() { _ = l.Close() })
-		go func() { _ = coll.Serve(l) }()
-		accepted(t, "the claim", r.send(r.base().with(claim{"collector_url": "http://" + collectorName + "/"})))
-		reqs := coll.Requests()
-		if len(reqs) == 0 {
-			t.Fatalf("the collector at http://%s/ received no request before the claim's 200", collectorName)
-		}
-		for _, q := range reqs {
-			if !strings.HasPrefix(q.Path, "/v1/") {
-				t.Errorf("the relay requested %s %q of the collector, whose path does not start /v1/ (the base URL's trailing / is removed)", q.Method, q.Path)
-			}
-		}
-		asked := false
-		for _, q := range r.up.Resolvers[0].Queries() {
-			asked = asked || strings.EqualFold(q.Name, collectorName+".")
-		}
-		if !asked {
-			t.Errorf("the claim's resolver %s was not asked for %s", resolverAddr, collectorName)
-		}
-	},
+		out = append(out, runner.Case{
+			Name:  "a collector_url " + url + " is a base URL the relay requests itself, with " + with,
+			Cites: []string{"CLAIM-23", "CLAIM-22", "CLAIM-31"},
+			Role:  "relay",
+			Ends:  true,
+			Run: func(t *runner.T) {
+				r := startRelay(t, attach.Params{})
+				r.up.Resolvers[0].Set(v.name, collectorAddr)
+				coll := collector.New(collector.Form{}, nil)
+				l, err := t.Network(attach.Upstream).Listen(t.Context(), "tcp", netip.AddrPortFrom(collectorAddr, 80).String())
+				if err != nil {
+					t.Fatalf("the collector's listener: %v", err)
+				}
+				t.Cleanup(func() { _ = l.Close() })
+				go func() { _ = coll.Serve(l) }()
+				var tunneled *collector.Collector
+				if v.tunnel {
+					tunneled = collector.New(collector.Form{}, nil)
+					r.tunnel(tunneled)
+				}
+				accepted(t, "the claim", r.send(r.base().with(claim{"collector_url": url})))
+				reqs := coll.Requests()
+				if len(reqs) == 0 {
+					t.Fatalf("the collector at %s received no request before the claim's 200", url)
+				}
+				for _, q := range reqs {
+					if !strings.HasPrefix(q.Path, "/v1/") {
+						t.Errorf("the relay requested %s %q of the collector, whose path does not start /v1/ (the base URL's trailing / is removed)", q.Method, q.Path)
+					}
+				}
+				if tunneled != nil {
+					for _, q := range tunneled.Requests() {
+						t.Errorf("the relay sent %s %s on the tunnel, which %s does not select", q.Method, q.Path, url)
+					}
+				}
+				asked := false
+				for _, q := range r.up.Resolvers[0].Queries() {
+					asked = asked || strings.EqualFold(q.Name, v.name+".")
+				}
+				if !asked {
+					t.Errorf("the claim's resolver %s was not asked for %s", resolverAddr, v.name)
+				}
+			},
+		})
+	}
+	return out
 }
 
 // collectorUnreachable claims a fresh relay with a collector_url at which

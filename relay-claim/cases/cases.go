@@ -47,7 +47,6 @@ var Cases = slices.Concat([]runner.Case{
 	buildLinkInvalid,
 	upstreamDNSInvalid,
 	claimLimit,
-	collectorAtURL,
 	collectorUnreachable,
 	environmentUnusable,
 	resolverOrder,
@@ -66,4 +65,4 @@ var Cases = slices.Concat([]runner.Case{
 	// The claimant.
 	claimantRequests,
 	claimantRetries,
-}, collectorToken(), captureModes(), upstreamRoots(), environmentLanded(), resolverFailover())
+}, collectorToken(), captureModes(), upstreamRoots(), environmentLanded(), resolverFailover(), collectorAtURL())
