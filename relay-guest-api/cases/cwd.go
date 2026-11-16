@@ -103,6 +103,26 @@ var cwdRefused = runner.Case{
 	},
 }
 
+// cwdRefusedEnds: a cwd path with a segment that ends in ".", "-" or "_"
+// breaks the rule too: GUEST-33 relaxes GUEST-28 for a context path at a
+// segment's start only. It is answered 403 with "forbidden", and the relay
+// asks the collector nothing for it.
+var cwdRefusedEnds = runner.Case{
+	Name:  "a cwd path with a segment that ends in a dot, a dash or an underscore is answered 403, and the collector is not asked",
+	Cites: []string{"GUEST-33"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		w := startWeb(t, webOpts{form: collector.Form{Context: buildContext()}})
+		for _, p := range []string{"/a.", "/a-", "/a_", "/dir/x_/", "/.warden./x", "/-dash-/_under.dat"} {
+			refused(t, "GET http://cwd"+p, w.get("cwd", p), http.StatusForbidden, "forbidden\n")
+		}
+		if rs := w.received(http.MethodGet, "/v1/context/"); len(rs) > 0 {
+			t.Errorf("the relay sent the collector GET %s for a path it refuses", rs[0].Path)
+		}
+	},
+}
+
 // health: GET /health on the control plane is answered 200 with "ok",
 // whatever the request's Host.
 var health = runner.Case{

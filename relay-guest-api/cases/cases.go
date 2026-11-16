@@ -52,6 +52,7 @@ var Cases = []runner.Case{
 	notFound,
 	cwdServed,
 	cwdRefused,
+	cwdRefusedEnds,
 	health,
 	outputForwarded,
 	outputRefused,
