@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -227,11 +228,13 @@ func (b *build) count(method, path string) int {
 // servedRecords counts the records of l that record body as the body of a
 // GET's response with status 200: a close record on a channel the ledger
 // opened for a GET, whose payload is body, into the build (GUEST-49 in
-// relay-guest-api, which BOOTCFG-2 refers to).
+// relay-guest-api, which BOOTCFG-2 refers to). An empty body is a close
+// record with no payload; no other GET of the cases is answered 200 with
+// none (GUEST-36's /health is answered "ok").
 func servedRecords(l *ledger.Ledger, body []byte) int {
 	n := 0
 	for _, r := range l.Records {
-		if r.Type != ledger.Close || r.PayloadSize <= 0 {
+		if r.Type != ledger.Close || r.PayloadSize < 0 || (r.PayloadSize == 0) != (len(body) == 0) {
 			continue
 		}
 		if st, _ := r.Int("status"); st != http.StatusOK || l.CheckPayload(r, body) != nil {
@@ -256,6 +259,33 @@ func bootstrapChannels(l *ledger.Ledger) []string {
 		raw, _ := r.Text("url")
 		if u, err := url.Parse(raw); err == nil && u.Path == "/bootstrap" {
 			m, _ := r.Text("method")
+			out = append(out, "record "+strconv.Itoa(r.Index)+": "+m+" "+raw)
+		}
+	}
+	return out
+}
+
+// strayChannels names the channels of l the ledger opened for a request a
+// case of BOOTCFG-3 does not make besides its fetch: any GET but the control
+// plane's GET /health that buildenv.Ready polls, and any request at all to
+// a path that ends in "bootstrap", whatever its method and host. The build's
+// POST http://artifacts/exit, which the relay may record, is neither. A
+// relay that records its own exchange with the collector, under
+// /v1/bootstrap or any other URL, is named here.
+func strayChannels(l *ledger.Ledger) []string {
+	var out []string
+	for _, r := range l.Records {
+		if r.Type != ledger.Open {
+			continue
+		}
+		raw, _ := r.Text("url")
+		m, _ := r.Text("method")
+		u, err := url.Parse(raw)
+		if err != nil {
+			out = append(out, "record "+strconv.Itoa(r.Index)+": "+m+" "+strconv.Quote(raw)+" (not a URL)")
+			continue
+		}
+		if strings.HasSuffix(u.Path, "bootstrap") || (m == http.MethodGet && u.Path != "/health") {
 			out = append(out, "record "+strconv.Itoa(r.Index)+": "+m+" "+raw)
 		}
 	}

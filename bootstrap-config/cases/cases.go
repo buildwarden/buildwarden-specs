@@ -12,6 +12,8 @@ import "github.com/buildwarden/buildwarden-specs/conformance/runner"
 // Cases are the suite's cases.
 var Cases = []runner.Case{
 	carriesAccepted,
+	carriesEmpty,
+	carriesBlank,
 	carriesRejected,
 	collectorHasNone,
 	collectorFails,

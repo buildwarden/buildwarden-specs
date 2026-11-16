@@ -31,8 +31,16 @@ var rejectedConfig = []byte("\xef\xbb\xbf{\"version\":2,\"Trust\":{\"mode\":\"Ex
 // servesAndRecords has the build fetch the collector's config twice, and
 // checks that each fetch reached the collector, was answered 200 with
 // application/json and the collector's bytes, and was recorded.
+//
+// BOOTCFG-1 asks for a request to the collector for each fetch and not for
+// exactly one, so each fetch is held to at least one request of its own: a
+// relay that serves the second fetch from what it read for the first fails.
+// The Content-Type is compared by its media type, as the suites of
+// relay-claim and collector-inputs compare it, so a parameter such as a
+// charset is not a failure.
 func servesAndRecords(t *runner.T, config []byte) {
 	b := claimRelay(t, collector.Form{Token: collectorToken, Bootstrap: config}, nil, nil)
+	before := b.count(http.MethodGet, collectorPath)
 	for i := range 2 {
 		rep := b.do(http.MethodGet, bootstrapURL)
 		if rep.status != http.StatusOK {
@@ -44,9 +52,11 @@ func servesAndRecords(t *runner.T, config []byte) {
 		if !bytes.Equal(rep.body, config) {
 			t.Errorf("fetch %d of %s served %s, want the collector's bytes %s", i+1, bootstrapURL, short(rep.body), short(config))
 		}
-	}
-	if n := b.count(http.MethodGet, collectorPath); n != 2 {
-		t.Errorf("the build fetched %s twice, and the relay sent GET %s to the collector %d times, want 2; the collector received:\n%s", bootstrapURL, collectorPath, n, b.requests())
+		now := b.count(http.MethodGet, collectorPath)
+		if now == before {
+			t.Errorf("the relay answered fetch %d of %s without sending GET %s to the collector for it; the collector received:\n%s", i+1, bootstrapURL, collectorPath, b.requests())
+		}
+		before = now
 	}
 	l := b.exit()
 	if n := servedRecords(l, config); n != 2 {
@@ -64,6 +74,27 @@ var carriesAccepted = runner.Case{
 	Run:   func(t *runner.T) { servesAndRecords(t, acceptedConfig) },
 }
 
+// carriesEmpty is BOOTCFG-1 and BOOTCFG-2 with an empty body: a 200 is
+// carried whatever its body, though to an executor an empty one is the same
+// config as a 404 (BOOTCFG-10).
+var carriesEmpty = runner.Case{
+	Name:  "a relay serves and records an empty bootstrap body as it does any other",
+	Cites: []string{"BOOTCFG-1", "BOOTCFG-2"},
+	Role:  "relay",
+	Ends:  true,
+	Run:   func(t *runner.T) { servesAndRecords(t, []byte{}) },
+}
+
+// carriesBlank is BOOTCFG-1 and BOOTCFG-2 with a body of JSON white space
+// only, the other form of the empty config (BOOTCFG-10).
+var carriesBlank = runner.Case{
+	Name:  "a relay serves and records a bootstrap body of JSON white space only as it does any other",
+	Cites: []string{"BOOTCFG-1", "BOOTCFG-2"},
+	Role:  "relay",
+	Ends:  true,
+	Run:   func(t *runner.T) { servesAndRecords(t, []byte(" \t\r\n")) },
+}
+
 // carriesRejected is BOOTCFG-1 and BOOTCFG-2 with a body this version
 // rejects: the relay neither parses nor checks it.
 var carriesRejected = runner.Case{
@@ -76,7 +107,11 @@ var carriesRejected = runner.Case{
 
 // notServed has the collector answer GET /v1/bootstrap other than 200, or
 // fail it, through form, fault and override, and checks that the build is
-// answered 404 and that the ledger records nothing for the request.
+// answered 404 after the relay asked the collector, and that the ledger
+// records nothing for the fetch: no exchange under any URL but the ones the
+// case's build makes besides it (strayChannels), and not the bytes the
+// collector holds. A relay may ask the collector more than once before it
+// answers: BOOTCFG-3 does not say how often it asks.
 func notServed(t *runner.T, form collector.Form, fault collector.Fault, override http.HandlerFunc) {
 	form.Token = collectorToken
 	b := claimRelay(t, form, fault, override)
@@ -84,12 +119,17 @@ func notServed(t *runner.T, form collector.Form, fault collector.Fault, override
 	if rep.status != http.StatusNotFound {
 		t.Errorf("%s was answered %d %s, want 404", bootstrapURL, rep.status, short(rep.body))
 	}
-	if n := b.count(http.MethodGet, collectorPath) + int(b.w.overridden.Load()); n != 1 {
-		t.Errorf("the relay sent GET %s to the collector %d times for the build's one fetch, want 1; the collector received:\n%s", collectorPath, n, b.requests())
+	if n := b.count(http.MethodGet, collectorPath) + int(b.w.overridden.Load()); n < 1 {
+		t.Errorf("the relay answered the build's fetch without sending GET %s to the collector; the collector received:\n%s", collectorPath, b.requests())
 	}
 	l := b.exit()
-	if rs := bootstrapChannels(l); len(rs) > 0 {
-		t.Errorf("the ledger records the request the relay answered 404: %s", strings.Join(rs, "; "))
+	if rs := strayChannels(l); len(rs) > 0 {
+		t.Errorf("the ledger records an exchange for the fetch the relay answered 404: %s", strings.Join(rs, "; "))
+	}
+	if form.Bootstrap != nil {
+		if n := servedRecords(l, form.Bootstrap); n > 0 {
+			t.Errorf("the ledger records the collector's config as a GET's 200 body %d times, though the relay answered the build 404", n)
+		}
 	}
 }
 
