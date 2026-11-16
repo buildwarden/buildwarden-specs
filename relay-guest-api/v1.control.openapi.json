@@ -5,7 +5,7 @@
     "title": "relay-guest-api: the control plane",
     "version": "v1",
     "summary": "What the relay serves the build environment on port 8300: its health, its authority, the build's output and its completion.",
-    "description": "The control plane of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's Host whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. /v1/output and /v1/complete take POST only (405 otherwise, GUEST-40); any other path is 404.",
+    "description": "The control plane of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's target host (that of an absolute URL, or else the Host) whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. /v1/output and /v1/complete take POST only (405 otherwise, GUEST-40); any other clean path is 404; the reply to a path that is not clean is not defined (GUEST-40).",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -86,12 +86,11 @@
         ],
         "requestBody": {
           "required": true,
-          "description": "Console output, in order; at most 256 MiB in all for one build.",
+          "description": "Console output, in order, whatever the Content-Type; at most 256 MiB in all for one build.",
           "content": {
-            "application/octet-stream": {
+            "*/*": {
               "schema": {
-                "type": "string",
-                "contentMediaType": "application/octet-stream"
+                "type": "string"
               }
             }
           }
@@ -147,10 +146,10 @@
             "name": "code",
             "in": "query",
             "required": false,
-            "description": "The exit code, a decimal integer; 0 when absent or empty.",
+            "description": "The exit code, a decimal integer that fits a signed 64-bit integer; 0 when absent or empty.",
             "schema": {
               "type": "string",
-              "pattern": "^-?[0-9]+$"
+              "pattern": "^(-?[0-9]+)?$"
             },
             "x-requirements": [
               "GUEST-22",

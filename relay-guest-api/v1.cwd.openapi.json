@@ -5,7 +5,7 @@
     "title": "relay-guest-api: the reserved host cwd",
     "version": "v1",
     "summary": "What the relay serves the build environment as http://cwd/: the build context.",
-    "description": "The reserved host cwd of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's Host whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. A context path may hold several segments: /{path} is one template whose parameter is marked x-multi-segment and whose rule is GUEST-33's. Only GET is served; another method is proxied (D10).",
+    "description": "The reserved host cwd of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's target host (that of an absolute URL, or else the Host) whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. A context path may hold several segments: /{path} is one template whose parameter is marked x-multi-segment and whose rule is GUEST-33's. Only GET is served; another method is proxied (D10).",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -18,7 +18,7 @@
     },
     {
       "url": "https://cwd",
-      "description": "Port 443, through interception (GUEST-42); routed by Host as on port 80."
+      "description": "Port 443, through interception (GUEST-42); routed as on port 80."
     }
   ],
   "paths": {
