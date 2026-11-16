@@ -219,8 +219,8 @@ func (g *Guest) serveCwd(req *http.Request, scheme string) response {
 // validName applies GUEST-28 to an artifact's name and, with context, the
 // rule as it stands for a context path (GUEST-33): at most NameLimit bytes,
 // no leading or trailing "/", and segments of ASCII letters, digits, ".",
-// "-" and "_", none empty; an artifact's segment neither starts nor ends
-// with ".", "-" or "_", and a context path's is not "." or "..".
+// "-" and "_", none empty, none ending with ".", "-" or "_"; an artifact's
+// segment does not start with one either, and a context path's may.
 func validName(name string, context bool) bool {
 	if len(name) > NameLimit || name == "" {
 		return false
@@ -235,13 +235,17 @@ func validName(name string, context bool) bool {
 				return false
 			}
 		}
+		// seg is not empty here, so its last byte exists.
+		if strings.ContainsAny(seg[len(seg)-1:], ".-_") {
+			return false
+		}
 		if context {
 			if seg == "." || seg == ".." {
 				return false
 			}
 			continue
 		}
-		if strings.ContainsAny(seg[:1], ".-_") || strings.ContainsAny(seg[len(seg)-1:], ".-_") {
+		if strings.ContainsAny(seg[:1], ".-_") {
 			return false
 		}
 	}
