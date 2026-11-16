@@ -28,7 +28,10 @@ const (
 // (GUEST-8 to GUEST-11), drops an ARP request for any address but the
 // relay's, which the stack would answer since it takes every address as its
 // own (GUEST-3), and drops a frame that is neither ARP nor IPv4 (GUEST-7).
-// It also sends the gratuitous ARP of GUEST-5.
+// It takes the build environment's MAC address from the source of the first
+// frame it reads, and sends every frame the stack addresses to one host
+// there, broadcast until it has read one (GUEST-4). It also sends the
+// gratuitous ARP of GUEST-5.
 type frameLink struct {
 	net.Conn
 	ctx   context.Context
@@ -36,7 +39,12 @@ type frameLink struct {
 	relay netip.Addr
 
 	wmu sync.Mutex
-	buf []byte
+	// peer is the first frame's source, nil until one is read. It has a
+	// lock of its own: a Read must not wait on a Write that the other end
+	// of the link holds up.
+	pmu  sync.Mutex
+	peer net.HardwareAddr
+	buf  []byte
 }
 
 func newFrameLink(ctx context.Context, c net.Conn, g *Guest) *frameLink {
@@ -54,6 +62,11 @@ func (f *frameLink) Read(p []byte) (int, error) {
 		if n < ethHeader {
 			continue
 		}
+		f.pmu.Lock()
+		if f.peer == nil {
+			f.peer = append(net.HardwareAddr(nil), fr[6:12]...)
+		}
+		f.pmu.Unlock()
 		switch binary.BigEndian.Uint16(fr[12:14]) {
 		case netstack.EtherTypeARP:
 			if n < ethHeader+arpLen {
@@ -80,9 +93,30 @@ func (f *frameLink) Read(p []byte) (int, error) {
 	}
 }
 
-// Write sends one frame; the stack, the lease and the announcement share
-// the link.
+// Write sends one frame of the stack's. One the stack addresses to a single
+// host goes to the build environment's MAC address, or is broadcast before
+// the relay has read a frame (GUEST-4); a broadcast or multicast frame goes
+// as it is.
 func (f *frameLink) Write(p []byte) (int, error) {
+	f.pmu.Lock()
+	dst := f.peer
+	f.pmu.Unlock()
+	f.wmu.Lock()
+	defer f.wmu.Unlock()
+	if len(p) >= ethHeader && p[0]&1 == 0 {
+		if dst == nil {
+			dst = netstack.BroadcastMAC
+		}
+		fr := append([]byte(nil), p...)
+		copy(fr[0:6], dst)
+		return f.Conn.Write(fr)
+	}
+	return f.Conn.Write(p)
+}
+
+// writeRaw sends one frame as it is: the lease's reply, which goes to the
+// request's chaddr (GUEST-9), and the announcement, which is broadcast.
+func (f *frameLink) writeRaw(p []byte) (int, error) {
 	f.wmu.Lock()
 	defer f.wmu.Unlock()
 	return f.Conn.Write(p)
@@ -105,7 +139,7 @@ func (f *frameLink) lease(u netstack.UDPFrame) {
 		Dst:     netip.AddrPortFrom(netip.AddrFrom4([4]byte{255, 255, 255, 255}), portClient),
 		Payload: m.Marshal(),
 	}
-	_, _ = f.Write(out.Marshal())
+	_, _ = f.writeRaw(out.Marshal())
 }
 
 // announce broadcasts a gratuitous ARP reply for the relay's address every
@@ -130,7 +164,7 @@ func (f *frameLink) announce() {
 		defer t.Stop()
 		end := time.After(AnnounceFor)
 		for {
-			if _, err := f.Write(fr); err != nil {
+			if _, err := f.writeRaw(fr); err != nil {
 				return
 			}
 			select {

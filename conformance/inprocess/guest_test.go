@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/binary"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -507,6 +508,69 @@ func TestARP(t *testing.T) {
 	}
 	if !bytes.Equal(fr[22:28], relay.RelayMAC) || binary.BigEndian.Uint16(fr[20:22]) != 2 {
 		t.Errorf("the ARP reply: % x", fr)
+	}
+}
+
+// TestFirstMAC: the relay sends its frames to the source of the first frame
+// it received, whatever later frames come from (GUEST-4).
+func TestFirstMAC(t *testing.T) {
+	t.Parallel()
+	ctx := testCtx(t)
+	a, err := Relay(relay.ModeHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := world(t, network(t, a, attach.Upstream))
+	in, err := a.Start(ctx, attach.Params{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Stop()
+	cl := claimant.Claimant{Net: network(t, a, attach.Claim), Endpoint: in.Claim()}
+	tun, _, err := cl.Session(ctx, collector.New(collector.Form{}, nil), claimant.Config{UpstreamDNS: up.DNS(),
+		BuildLink: &claimant.BuildLink{Prefix: BuildLink.Prefix, Relay: BuildLink.Relay, Guest: BuildLink.Guest}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tun.Close()
+	link, _ := in.Frames()
+	first := net.HardwareAddr{0x02, 0, 0, 0, 0, 0x0a}
+	// The first frame, of an EtherType the relay drops, from first.
+	if _, err := link.Write([]byte{0x02, 0, 0, 0, 0, 0x0f, 0x02, 0, 0, 0, 0, 0x0a, 0x86, 0xdd, 0, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	// Then an ARP request for the relay's address from guestMAC.
+	fr := make([]byte, 42)
+	copy(fr[0:6], netstack.BroadcastMAC)
+	copy(fr[6:12], guestMAC)
+	binary.BigEndian.PutUint16(fr[12:14], netstack.EtherTypeARP)
+	binary.BigEndian.PutUint16(fr[14:16], 1)
+	binary.BigEndian.PutUint16(fr[16:18], netstack.EtherTypeIPv4)
+	fr[18], fr[19] = 6, 4
+	binary.BigEndian.PutUint16(fr[20:22], 1)
+	copy(fr[22:28], guestMAC)
+	g := netip.MustParseAddr(BuildLink.Guest).As4()
+	copy(fr[28:32], g[:])
+	r := netip.MustParseAddr(BuildLink.Relay).As4()
+	copy(fr[38:42], r[:])
+	if _, err := link.Write(fr); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 2048)
+	_ = link.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for {
+		n, err := link.Read(buf)
+		if err != nil {
+			t.Fatalf("no ARP reply for the relay's address: %v", err)
+		}
+		got := buf[:n]
+		if n < 42 || got[0]&1 != 0 || binary.BigEndian.Uint16(got[12:14]) != netstack.EtherTypeARP {
+			continue
+		}
+		if !bytes.Equal(got[0:6], first) {
+			t.Errorf("the ARP reply went to %s, want %s, the first frame's source", net.HardwareAddr(got[0:6]), first)
+		}
+		return
 	}
 }
 
