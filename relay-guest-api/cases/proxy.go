@@ -515,7 +515,9 @@ var roundTrip = runner.Case{
 // build sends nothing after its completion (GUEST-55), and a relay's
 // replies to what it would send are not defined, so the case sends nothing:
 // it checks what the relay does by itself, after a build that had proxied,
-// served and stored before its completion.
+// served and stored before its completion. It checks only that: a relay
+// that would record a request the build sent after its completion is not
+// seen, since no case sends one (Known divergences, D18).
 var nothingAfterCompletion = runner.Case{
 	Name:  "once the build has completed, the relay records nothing more and sends its collector no more of the ledger",
 	Cites: []string{"GUEST-55"},
