@@ -537,6 +537,21 @@ func TestClaimBeingProcessed(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
+	// The probe waits for the relay to be processing the claim on conn: a
+	// probe sent before it would be processed first, and conn's claim be
+	// the one refused.
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		fx.r.mu.Lock()
+		processing := fx.r.processing
+		fx.r.mu.Unlock()
+		if processing {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the relay did not start processing the claim")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	expect(t, probe(409), nil, 409, "already claimed")
 	rep, err := fx.cl.Do(c, http.MethodPost, "/v1/tunnel", http.Header{"Connection": {"Upgrade"}, "Upgrade": {"warden-tunnel"}}, nil)
 	expect(t, rep, err, 409, "tunnel already open")
