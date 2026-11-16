@@ -4,4 +4,3 @@ GUEST-18 A requirement of the build environment alone; the executor's side of th
 GUEST-52 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
 GUEST-53 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
 GUEST-54 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
-GUEST-55 The suites send nothing a relay would record after a completion, since the Go relay ends on it (D18), and the replies after completion are not defined; what is left, that nothing more is recorded, is an absence a suite cannot provoke.
