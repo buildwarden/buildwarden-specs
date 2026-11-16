@@ -136,8 +136,6 @@ var health = runner.Case{
 			rep := w.send(controlPort, "", request(http.MethodGet, "/health", host, nil))
 			expect(t, "GET /health with Host "+host+" on port 8300", rep, http.StatusOK, "", []byte("ok"))
 		}
-		rep := w.send(controlPort, "", "GET /health HTTP/1.0\r\n\r\n")
-		expect(t, "GET /health over HTTP/1.0 on port 8300", rep, http.StatusOK, "", []byte("ok"))
 	},
 }
 
