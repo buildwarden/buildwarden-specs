@@ -285,8 +285,12 @@ func (in *Instance) Close() error {
 	if in.relayNS != nil {
 		errs = append(errs, inNS(in.s.ns, func() error { return delLink(in.names.Upstream) }))
 	}
+	// The build environment owns the frame socket once it starts on it
+	// (buildenv), and may have closed it already.
 	if in.frames != nil {
-		errs = append(errs, in.frames.Close())
+		if err := in.frames.Close(); !errors.Is(err, net.ErrClosed) {
+			errs = append(errs, err)
+		}
 	}
 	for _, f := range []*os.File{in.relayFrames, in.buildNS, in.relayNS} {
 		if f != nil {
