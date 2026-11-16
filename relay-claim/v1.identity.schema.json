@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/buildwarden/buildwarden-specs/relay-claim/v1.identity.schema.json",
+  "title": "The relay's identity, version 1",
+  "description": "The body of the 200 reply to POST /v1/claim (relay-claim/v1.md, The reply, CLAIM-33). A claimant ignores members it does not know.",
+  "type": "object",
+  "properties": {
+    "ca_cert": {
+      "description": "The PEM encoding of the certificate of the certificate authority the relay created for the build.",
+      "type": "string",
+      "pattern": "^-----BEGIN CERTIFICATE-----"
+    },
+    "ledger_public_key": {
+      "description": "The Ed25519 public key that signs the build's ledger, as 64 lower-case hexadecimal digits.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "required": ["ca_cert", "ledger_public_key"]
+}
