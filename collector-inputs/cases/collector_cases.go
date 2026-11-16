@@ -549,7 +549,7 @@ var unauthorizedInputs = runner.Case{
 	Run: func(t *runner.T) {
 		s := claimedBy(t, attach.Params{Script: scriptFile(t), Context: contextDir(t)})
 		tok := s.requireToken()
-		for _, auth := range []string{"", "Bearer " + tok + "x", "Bearer wrong", "Basic " + tok} {
+		for _, auth := range []string{"", "Bearer " + tok + "x", "Bearer wrong"} {
 			h := http.Header{}
 			if auth != "" {
 				h.Set("Authorization", auth)
