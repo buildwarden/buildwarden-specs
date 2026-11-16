@@ -32,8 +32,8 @@ func buildContext() map[string][]byte {
 // cwdServed: a GET for cwd of a file is answered with the file's bytes and
 // recorded; of the root, a directory or a path with a trailing "/", with
 // the collector's listing, unchanged and not recorded; of a path the
-// context does not have, 404. Each goes to the collector as the path asks,
-// a trailing "/" kept.
+// context does not have, or one the collector answers 500, 404. Each goes
+// to the collector as the path asks, a trailing "/" kept.
 var cwdServed = runner.Case{
 	Name:  "cwd serves a context file byte for byte, recorded, and a listing unchanged, not recorded; a missing path is 404",
 	Cites: []string{"GUEST-34", "GUEST-49"},
@@ -41,7 +41,13 @@ var cwdServed = runner.Case{
 	Ends:  true,
 	Run: func(t *runner.T) {
 		ctx := buildContext()
-		w := startWeb(t, webOpts{form: collector.Form{Context: ctx}})
+		fault := func(r *http.Request) int {
+			if r.URL.Path == "/v1/context/broken.txt" {
+				return http.StatusInternalServerError
+			}
+			return 0
+		}
+		w := startWeb(t, webOpts{form: collector.Form{Context: ctx}, fault: fault})
 		files := []string{"a.txt", "dir/b.bin", "dir/sub/c", ".warden/stage-1", "-dash/_under.dat"}
 		for _, f := range files {
 			expect(t, "GET http://cwd/"+f, w.get("cwd", "/"+f), http.StatusOK, "application/octet-stream", ctx[f])
@@ -62,16 +68,17 @@ var cwdServed = runner.Case{
 			expect(t, "GET http://cwd"+l.target, rep, http.StatusOK, "text/plain", gave)
 			listings = append(listings, gave)
 		}
-		rep := w.get("cwd", "/missing.txt")
-		refused(t, "GET http://cwd/missing.txt", rep, http.StatusNotFound, "")
-		if len(w.received(http.MethodGet, "/v1/context/missing.txt")) == 0 {
-			t.Errorf("the relay answered GET http://cwd/missing.txt without asking the collector:\n%s", w.requests())
+		for _, m := range []string{"missing.txt", "broken.txt"} {
+			refused(t, "GET http://cwd/"+m, w.get("cwd", "/"+m), http.StatusNotFound, "")
+			if len(w.received(http.MethodGet, "/v1/context/"+m)) == 0 {
+				t.Errorf("the relay answered GET http://cwd/%s without asking the collector:\n%s", m, w.requests())
+			}
 		}
 		l := w.exit()
 		for _, f := range files {
 			served(t, l, "/"+f, ctx[f])
 		}
-		notRecorded(t, l, "a listing of cwd", []string{"/", "/dir", "/dir/", "/dir/sub/", "/missing.txt"}, listings...)
+		notRecorded(t, l, "a listing of cwd", []string{"/", "/dir", "/dir/", "/dir/sub/", "/missing.txt", "/broken.txt"}, listings...)
 	},
 }
 

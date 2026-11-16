@@ -220,6 +220,28 @@ var (
 		[]string{"GUEST-39"}, controlPort, "/v1/complete", 0)
 )
 
+// exitRefused: a completion the collector refuses does not change the
+// reply to /exit: it is still 200 and ok, after the relay sent it.
+var exitRefused = runner.Case{
+	Name:  "/exit is answered 200 and ok when the collector refuses the completion",
+	Cites: []string{"GUEST-21"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		fault := func(r *http.Request) int {
+			if r.URL.Path == "/v1/complete" {
+				return http.StatusInternalServerError
+			}
+			return 0
+		}
+		w := startWeb(t, webOpts{fault: fault})
+		expect(t, "POST http://artifacts/exit?code=5, whose completion the collector answers 500", w.post("artifacts", "/exit?code=5", nil), http.StatusOK, "text/plain", okBody)
+		if len(w.received(http.MethodPost, "/v1/complete")) == 0 {
+			t.Errorf("the relay answered /exit without sending the collector the completion:\n%s", w.requests())
+		}
+	},
+}
+
 // caServed: /ca.pem on artifacts and on the control plane is answered 200,
 // application/x-pem-file, with the claim reply's ca_cert byte for byte, and
 // neither is recorded.

@@ -39,6 +39,7 @@ var Cases = []runner.Case{
 	exitMost,
 	exitAbsent,
 	exitEmpty,
+	exitRefused,
 	caServed,
 	crlServed,
 	scriptServed,
