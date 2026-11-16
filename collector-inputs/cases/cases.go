@@ -28,6 +28,7 @@ var Cases = []runner.Case{
 	tokenless,
 
 	inputsOnRequest,
+	baseURL,
 	noTokenSent,
 	notAnInput,
 	contextPaths,
@@ -35,5 +36,6 @@ var Cases = []runner.Case{
 	readyOnce,
 	completionSent,
 	signalsNotDelivered,
+	heartbeatUnanswered,
 	completionUnanswered,
 }

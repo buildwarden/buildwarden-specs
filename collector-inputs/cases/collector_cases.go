@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	collectorinputs "github.com/buildwarden/buildwarden-specs/collector-inputs"
@@ -163,8 +164,11 @@ var noScriptServed = runner.Case{
 
 // bootstrapServed serves a bootstrap config as application/json, the same
 // bytes each time. The case does not know the config the collector was
-// given, so it checks only that what is served is one JSON document and is
-// served alike twice; its schema is bootstrap-config's.
+// given (a target has no parameter for it), so it cannot check COLLIN-14's
+// "byte for byte"; it checks only that what is served is one JSON document
+// and is served alike twice. That the document validates against
+// bootstrap-config's schema is a case of bootstrap-config's own suite,
+// whose schema this suite does not import.
 var bootstrapServed = runner.Case{
 	Name:    "a collector serves its bootstrap config at GET /v1/bootstrap as application/json",
 	Cites:   []string{"COLLIN-14"},
@@ -307,20 +311,24 @@ var noContextServed = runner.Case{
 }
 
 // contextLinks serves nothing through a link that leads out of the context,
-// and lists neither it nor a link to a directory inside.
+// and lists neither it nor a link to a directory inside. The link to the
+// directory inside is relative, so that it stays inside on a host whose
+// temporary directory is reached through a link itself (macOS's /var). The
+// case does not apply on a host where the harness cannot make a symbolic
+// link (Windows without the privilege or Developer Mode).
 var contextLinks = runner.Case{
 	Name:    "a collector serves no symbolic link that leads out of the context, and lists no link to a directory",
 	Cites:   []string{"COLLIN-19"},
 	Role:    "collector",
 	Ends:    true,
-	Applies: claims,
+	Applies: all(claims, canLink),
 	Run: func(t *runner.T) {
 		dir := contextDir(t)
 		outside := filepath.Join(t.TempDir(), "secret.txt")
 		if err := os.WriteFile(outside, []byte("secret\n"), 0o644); err != nil {
 			t.Fatalf("a file outside the context: %v", err)
 		}
-		for link, to := range map[string]string{"out.txt": outside, "outdir": filepath.Dir(outside), "linkdir": filepath.Join(dir, "dir")} {
+		for link, to := range map[string]string{"out.txt": outside, "outdir": filepath.Dir(outside), "linkdir": "dir"} {
 			if err := os.Symlink(to, filepath.Join(dir, link)); err != nil {
 				t.Fatalf("a symbolic link %s in the context: %v", link, err)
 			}
@@ -337,6 +345,29 @@ var contextLinks = runner.Case{
 		wantInput(t, "GET /v1/context/ with links", rep, "text/plain", []byte(".warden/d.txt\na.txt\ndir/b.txt\ndir/sub/c.txt\n"))
 	},
 }
+
+// canLink applies where this host lets the harness make a symbolic link,
+// which it tries once, in a directory of its own.
+func canLink(target.Declared) string {
+	linkOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "bw-link-")
+		if err != nil {
+			linkErr = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		linkErr = os.Symlink("to", filepath.Join(dir, "link"))
+	})
+	if linkErr != nil {
+		return "this host does not let the harness make a symbolic link: " + linkErr.Error()
+	}
+	return ""
+}
+
+var (
+	linkOnce sync.Once
+	linkErr  error
+)
 
 // inputMethods answers 405 to a method other than GET on the inputs.
 var inputMethods = runner.Case{

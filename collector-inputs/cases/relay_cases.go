@@ -6,7 +6,9 @@ import (
 	"mime"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	collectorinputs "github.com/buildwarden/buildwarden-specs/collector-inputs"
@@ -36,11 +38,16 @@ func isInput(p string) bool {
 }
 
 // inputsOnRequest: the relay fetches an input only when the build asks for
-// one, once for each time it asks, at the base URL's path, with the token
-// on every request of the session.
+// one, once for each time it asks, with the token on every request of the
+// session, at a path that is clean and percent-encoded. The build also asks
+// for context paths with "." and ".." segments, which the relay may refuse
+// or resolve but must not send as they are. Of COLLIN-12 the case can see
+// the dot segments only: a context path is a safe name, whose bytes need no
+// encoding, and the Go relay refuses an unsafe one itself, so no name that
+// a conforming relay sends carries a byte to encode.
 var inputsOnRequest = runner.Case{
-	Name:  "a relay fetches an input only when the build asks, at the claim's base URL, with the token",
-	Cites: []string{"COLLIN-4", "COLLIN-9", "COLLIN-12", "COLLIN-28"},
+	Name:  "a relay fetches an input only when the build asks, at a clean path, with the token",
+	Cites: []string{"COLLIN-9", "COLLIN-12", "COLLIN-28"},
 	Role:  "relay",
 	Ends:  true,
 	Run: func(t *runner.T) {
@@ -62,6 +69,11 @@ var inputsOnRequest = runner.Case{
 				t.Errorf("the build's GET http://cwd/%s was answered %d %q, want 200 and the file", p, rep.status, short(rep.body))
 			}
 		}
+		// The relay's answer to these is its own (relay-guest-api); what
+		// it sends the collector for them is checked below.
+		for _, p := range []string{"dir/../.warden/d.txt", "./.warden/d.txt", ".warden/./d.txt", ".warden/.."} {
+			b.do(http.MethodGet, "http://cwd/"+p, nil)
+		}
 		b.do(http.MethodGet, "http://artifacts/heartbeat", nil)
 		b.exit(0)
 		for path, n := range map[string]int{"/v1/build-script": 1, "/v1/bootstrap": 1, "/v1/context/a.txt": 1, "/v1/context/dir/b.txt": 1, "/v1/context/dir/sub/c.txt": 1} {
@@ -78,6 +90,42 @@ var inputsOnRequest = runner.Case{
 			}
 			if bad := uncleanPath(r.Path); bad != "" {
 				t.Errorf("%s %s: %s", r.Method, r.Path, bad)
+			}
+		}
+	},
+}
+
+// baseURL: with a collector_url that has a path and a trailing "/", every
+// request goes to that path with the trailing "/" removed and the
+// protocol's path appended. The collector is served off the tunnel, at an
+// origin of the upstream, as the relay requests it itself.
+var baseURL = runner.Case{
+	Name:  "a relay sends every input and signal under the path of a base URL, with its trailing / removed",
+	Cites: []string{"COLLIN-4"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		o := buildOpts{form: fullForm(), base: "http://collector.example/base/"}
+		b := claimRelay(t, o)
+		if rep := b.do(http.MethodGet, "http://artifacts/build-script", nil); rep.status != http.StatusOK || !bytes.Equal(rep.body, script) {
+			t.Errorf("the build's GET http://artifacts/build-script was answered %d %q, want 200 and the script", rep.status, short(rep.body))
+		}
+		if rep := b.do(http.MethodGet, "http://cwd/dir/b.txt", nil); rep.status != http.StatusOK || string(rep.body) != contextFiles["dir/b.txt"] {
+			t.Errorf("the build's GET http://cwd/dir/b.txt was answered %d %q, want 200 and the file", rep.status, short(rep.body))
+		}
+		b.do(http.MethodGet, "http://artifacts/heartbeat", nil)
+		sleep(t, 2500*time.Millisecond)
+		b.exit(0)
+		targets := b.base.Targets()
+		for _, tg := range targets {
+			_, target, _ := strings.Cut(tg, " ")
+			if !strings.HasPrefix(target, "/base/v1/") {
+				t.Errorf("%s is not the base URL's path /base with the protocol's path appended", tg)
+			}
+		}
+		for _, p := range []string{"/v1/ready", "/v1/build-script", "/v1/context/dir/b.txt", "/v1/heartbeat", "/v1/complete"} {
+			if !slices.ContainsFunc(b.c.Requests(), func(r collector.Request) bool { return r.Path == p }) {
+				t.Errorf("the collector at the base URL received no request to /base%s; the relay sent:\n  %s", p, strings.Join(targets, "\n  "))
 			}
 		}
 	},
@@ -132,7 +180,8 @@ var noTokenSent = runner.Case{
 }
 
 // notAnInput: a relay reads only a 200 as the input. The collector answers
-// each input with another status, and the build is not served it.
+// each input with another status, or resets the request unanswered, and
+// the build is not served it.
 var notAnInput = runner.Case{
 	Name:  "a relay reads only a 200 as an input",
 	Cites: []string{"COLLIN-28"},
@@ -146,9 +195,13 @@ var notAnInput = runner.Case{
 			"/v1/context/dir/":      http.StatusPartialContent,
 			"/v1/context/dir/b.txt": http.StatusServiceUnavailable,
 		}
-		o := buildOpts{form: fullForm(), fault: func(r *http.Request) int { return statuses[r.URL.Path] }}
+		o := buildOpts{form: fullForm(), fault: func(r *http.Request) int { return statuses[r.URL.Path] },
+			override: map[string]http.HandlerFunc{
+				// A request that fails: its stream is reset unanswered.
+				"/v1/context/.warden/d.txt": func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) },
+			}}
 		b := claimRelay(t, o)
-		for _, u := range []string{"http://artifacts/build-script", "http://artifacts/bootstrap", "http://cwd/a.txt", "http://cwd/dir/", "http://cwd/dir/b.txt"} {
+		for _, u := range []string{"http://artifacts/build-script", "http://artifacts/bootstrap", "http://cwd/a.txt", "http://cwd/dir/", "http://cwd/dir/b.txt", "http://cwd/.warden/d.txt"} {
 			if rep := b.do(http.MethodGet, u, nil); rep.status == http.StatusOK {
 				t.Errorf("the collector did not give the input, and the build's GET %s was answered 200 %q", u, short(rep.body))
 			}
@@ -225,11 +278,15 @@ func overridden(o buildOpts, path string) bool {
 	return ok
 }
 
-// heartbeatForwarded: the relay sends no heartbeat before the build's first
-// activity, then one within 2 s of it and at least every 2 s while it is
-// less than 4 s old, and none once it is 5 s old.
+// heartbeatForwarded: the relay sends a heartbeat within 2 s of the build's
+// first activity and at least every 2 s while it is less than 4 s old, one
+// at a beat that finds it between 2 and 4 s old, and none once it is 5 s
+// old. What a relay sends before the build's first activity COLLIN-30 does
+// not say, and the case does not look. The build's last activity is put
+// 0.5 s after a heartbeat arrived, so that a beat finds it 3.5 s old: a
+// relay that stops at 3 s, or at 2 s, sends nothing then.
 var heartbeatForwarded = runner.Case{
-	Name:  "a relay sends heartbeats on a beat of 2 s while the build's last activity is recent, and none otherwise",
+	Name:  "a relay sends heartbeats on a beat of 2 s while the build's last activity is less than 4 s old, and none at 5 s",
 	Cites: []string{"COLLIN-30"},
 	Role:  "relay",
 	Ends:  true,
@@ -247,24 +304,33 @@ var heartbeatForwarded = runner.Case{
 			}
 			return out
 		}
-		sleep(t, 3*time.Second)
-		if n := len(beats()); n > 0 {
-			t.Errorf("the relay sent %d heartbeats before the build's first activity", n)
-		}
-		first := time.Now()
-		var last time.Time
-		for time.Since(first) < 6*time.Second {
+		activity := func() time.Time {
 			if rep := b.do(http.MethodGet, "http://artifacts/heartbeat", nil); rep.status != http.StatusOK {
 				t.Errorf("the build's GET http://artifacts/heartbeat was answered %d", rep.status)
 			}
-			last = time.Now()
+			return time.Now()
+		}
+		first := time.Now()
+		for time.Since(first) < 6*time.Second {
+			activity()
 			sleep(t, time.Second)
 		}
-		sleep(t, 7*time.Second)
 		hs := beats()
 		if len(hs) == 0 {
 			t.Fatalf("the relay sent no heartbeat for 6 s of the build's activity")
 		}
+		// Beats fall every 2 s from the last heartbeat that arrived; the
+		// last activity goes 0.5 s after one of them.
+		next := hs[len(hs)-1].BeganAt.Add(500 * time.Millisecond)
+		for !next.After(time.Now()) {
+			next = next.Add(2 * time.Second)
+		}
+		sleep(t, time.Until(next))
+		last := activity()
+		// Long enough for the beats that find it 5.5 s and 7.5 s old to
+		// arrive, so that a relay that goes on beating is seen to.
+		sleep(t, 9*time.Second)
+		hs = beats()
 		if d := hs[0].BeganAt.Sub(first); d > 2*time.Second+slack {
 			t.Errorf("the first heartbeat came %s after the build's first activity, want within 2s", d)
 		}
@@ -275,6 +341,18 @@ var heartbeatForwarded = runner.Case{
 			if d := hs[i].BeganAt.Sub(hs[i-1].BeganAt); d > 2*time.Second+slack {
 				t.Errorf("heartbeats %d and %d came %s apart while the build was active, want at most 2s", i, i+1, d)
 			}
+		}
+		// A beat arrives no earlier than it falls, so one that found the
+		// last activity 2 s old or more arrives 2 s after it or later.
+		if !slices.ContainsFunc(hs, func(h collector.Request) bool {
+			d := h.BeganAt.Sub(last)
+			return d >= 2*time.Second && d <= 4*time.Second+slack
+		}) {
+			var at []string
+			for _, h := range hs {
+				at = append(at, h.BeganAt.Sub(last).Round(time.Millisecond).String())
+			}
+			t.Errorf("no heartbeat came between 2 and 4 s after the build's last activity, when a beat finds it less than 4 s old; they came at %s from it", strings.Join(at, ", "))
 		}
 		for _, h := range hs {
 			if d := h.BeganAt.Sub(last); d > 5*time.Second+slack {
@@ -352,7 +430,10 @@ var completionSent = runner.Case{
 }
 
 // signalsNotDelivered: a ready or a heartbeat the collector does not take
-// fails neither the claim nor the build.
+// fails neither the claim nor the build, nor does a heartbeat it never
+// answers. COLLIN-33 gives no time for the bound on the wait for a reply,
+// so the case cannot see one: it checks that the build goes on while a
+// heartbeat is unanswered.
 var signalsNotDelivered = runner.Case{
 	Name:  "a relay whose ready and heartbeats are refused goes on with the claim and the build",
 	Cites: []string{"COLLIN-33"},
@@ -384,6 +465,40 @@ var signalsNotDelivered = runner.Case{
 		if rep := b.do(http.MethodGet, "http://artifacts/build-script", nil); rep.status != http.StatusOK || !bytes.Equal(rep.body, script) {
 			t.Errorf("the build's GET http://artifacts/build-script was answered %d %q, want 200 and the script", rep.status, short(rep.body))
 		}
+		b.exit(0)
+	},
+}
+
+// heartbeatUnanswered: a heartbeat the collector never answers holds up
+// neither the build's requests nor its completion.
+var heartbeatUnanswered = runner.Case{
+	Name:  "a relay whose heartbeat is never answered goes on with the build",
+	Cites: []string{"COLLIN-33"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		held := make(chan struct{})
+		var once sync.Once
+		o := buildOpts{form: fullForm(), override: map[string]http.HandlerFunc{
+			"/v1/heartbeat": func(_ http.ResponseWriter, r *http.Request) {
+				once.Do(func() { close(held) })
+				<-r.Context().Done()
+			},
+		}}
+		b := claimRelay(t, o)
+		b.do(http.MethodGet, "http://artifacts/heartbeat", nil)
+		select {
+		case <-held:
+		case <-time.After(4 * time.Second):
+			t.Fatalf("the relay sent no heartbeat within 4 s of the build's activity")
+		}
+		for _, u := range []string{"http://artifacts/heartbeat", "http://artifacts/build-script", "http://cwd/a.txt"} {
+			if rep := b.do(http.MethodGet, u, nil); rep.status != http.StatusOK {
+				t.Errorf("the build's GET %s was answered %d %q while a heartbeat was unanswered, want 200", u, rep.status, short(rep.body))
+			}
+		}
+		// exit fails the case unless the build's exit is answered 200 and
+		// the collector has the completion.
 		b.exit(0)
 	},
 }
