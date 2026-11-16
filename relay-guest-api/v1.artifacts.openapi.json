@@ -1,0 +1,323 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "relay-guest-api: the reserved host artifacts",
+    "version": "v1",
+    "summary": "What the relay serves the build environment as http://artifacts/.",
+    "description": "The reserved host artifacts of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's Host whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. Every POST to a path that is not fixed is an artifact's name, which may hold several segments: /{name} is one template whose parameter is marked x-multi-segment and whose rule is GUEST-28's. Any other request is answered 404 (GUEST-32); the Go relay serves the fixed paths whatever the method (D9).",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://artifacts",
+      "description": "Port 80 of the relay's address, or any address the build's connections reach the relay on (GUEST-17)."
+    },
+    {
+      "url": "https://artifacts",
+      "description": "Port 443, through interception (GUEST-42); routed by Host as on port 80."
+    }
+  ],
+  "paths": {
+    "/heartbeat": {
+      "get": {
+        "operationId": "heartbeat",
+        "summary": "Mark the build alive",
+        "x-requirements": [
+          "GUEST-19",
+          "GUEST-20",
+          "GUEST-31"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok, and a line feed.",
+            "x-requirements": [
+              "GUEST-19"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "ok\n"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/exit": {
+      "post": {
+        "operationId": "exit",
+        "summary": "Complete the build with its exit code",
+        "description": "Ends the ledger, sends it to the collector, then sends the collector the completion; terminal (GUEST-55).",
+        "x-requirements": [
+          "GUEST-21",
+          "GUEST-22",
+          "GUEST-31",
+          "GUEST-54"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "description": "The exit code, a decimal integer; 0 when absent or empty.",
+            "schema": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "x-requirements": [
+              "GUEST-22"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok, and a line feed.",
+            "x-requirements": [
+              "GUEST-21"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "ok\n"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ca.pem": {
+      "get": {
+        "operationId": "getCACertificate",
+        "summary": "The relay's certificate authority",
+        "x-requirements": [
+          "GUEST-23",
+          "GUEST-31"
+        ],
+        "responses": {
+          "200": {
+            "description": "The relay's certificate authority, the same bytes as the claim reply's ca_cert; not recorded.",
+            "x-requirements": [
+              "GUEST-23",
+              "GUEST-48",
+              "GUEST-50"
+            ],
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ca.crl": {
+      "get": {
+        "operationId": "getCACRL",
+        "summary": "The authority's empty CRL, which every leaf names",
+        "x-requirements": [
+          "GUEST-24",
+          "GUEST-31"
+        ],
+        "responses": {
+          "200": {
+            "description": "The DER bytes of the CRL, the same on every request; not recorded.",
+            "x-requirements": [
+              "GUEST-24",
+              "GUEST-50"
+            ],
+            "content": {
+              "application/pkix-crl": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/pkix-crl"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/build-script": {
+      "get": {
+        "operationId": "getBuildScript",
+        "summary": "The build script, from the collector",
+        "x-requirements": [
+          "GUEST-25",
+          "GUEST-31"
+        ],
+        "responses": {
+          "200": {
+            "description": "The collector's build script, byte for byte; recorded.",
+            "x-requirements": [
+              "GUEST-25",
+              "GUEST-49"
+            ],
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/octet-stream"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The collector has no build script.",
+            "x-requirements": [
+              "GUEST-25"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bootstrap": {
+      "get": {
+        "operationId": "getBootstrapConfig",
+        "summary": "The bootstrap config, from the collector",
+        "x-requirements": [
+          "GUEST-26",
+          "GUEST-31"
+        ],
+        "responses": {
+          "200": {
+            "description": "The collector's bootstrap config, byte for byte; recorded. Its format is the specification bootstrap-config's.",
+            "x-requirements": [
+              "GUEST-26",
+              "GUEST-49"
+            ],
+            "content": {
+              "application/json": {}
+            }
+          },
+          "404": {
+            "description": "The collector has no bootstrap config.",
+            "x-requirements": [
+              "GUEST-26"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{name}": {
+      "post": {
+        "operationId": "storeArtifact",
+        "summary": "Store an artifact",
+        "description": "Streams the body to the collector and records the artifact. An empty name is unnamed; a fixed path is not an artifact's name (GUEST-30).",
+        "x-requirements": [
+          "GUEST-27",
+          "GUEST-28",
+          "GUEST-29",
+          "GUEST-30"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The artifact's name, one or more segments separated by unescaped slashes (GUEST-28).",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            },
+            "x-multi-segment": true,
+            "x-requirements": [
+              "GUEST-27",
+              "GUEST-28"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The artifact's bytes, at most 2 GiB.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "artifact stored: <name> (<n> bytes), and a line feed.",
+            "x-requirements": [
+              "GUEST-27"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "artifact stored: dist/app.tar (1024 bytes)\n"
+              }
+            }
+          },
+          "400": {
+            "description": "invalid artifact name, and a line feed.",
+            "x-requirements": [
+              "GUEST-28"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "artifact size limit exceeded, and a line feed.",
+            "x-requirements": [
+              "GUEST-29"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The collector did not store the artifact.",
+            "x-requirements": [
+              "GUEST-29"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

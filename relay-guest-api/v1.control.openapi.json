@@ -1,0 +1,172 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "relay-guest-api: the control plane",
+    "version": "v1",
+    "summary": "What the relay serves the build environment on port 8300: its health, its authority, the build's output and its completion.",
+    "description": "The control plane of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's Host whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. /v1/output and /v1/complete take POST only (405 otherwise, GUEST-40); any other path is 404.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{relay}:8300",
+      "description": "Port 8300 of the relay's address; on a frame link, of any address (GUEST-35).",
+      "variables": {
+        "relay": {
+          "default": "relay",
+          "description": "The relay's address on the build link."
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Whether the relay is serving",
+        "x-requirements": [
+          "GUEST-36",
+          "GUEST-52"
+        ],
+        "responses": {
+          "200": {
+            "description": "ok, with no line feed.",
+            "x-requirements": [
+              "GUEST-36"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "ok"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ca.pem": {
+      "get": {
+        "operationId": "getCACertificate",
+        "summary": "The relay's certificate authority",
+        "x-requirements": [
+          "GUEST-37"
+        ],
+        "responses": {
+          "200": {
+            "description": "The relay's certificate authority, the same bytes as the claim reply's ca_cert; not recorded.",
+            "x-requirements": [
+              "GUEST-37",
+              "GUEST-23",
+              "GUEST-50"
+            ],
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/output": {
+      "post": {
+        "operationId": "postOutput",
+        "summary": "Forward the build's console output to the collector",
+        "x-requirements": [
+          "GUEST-38",
+          "GUEST-53"
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Console output, in order; at most 256 MiB in all for one build.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The collector took the output. Empty body.",
+            "x-requirements": [
+              "GUEST-38"
+            ]
+          },
+          "413": {
+            "description": "output limit exceeded, and a line feed.",
+            "x-requirements": [
+              "GUEST-38"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The collector did not take the output; the body says why.",
+            "x-requirements": [
+              "GUEST-38"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/complete": {
+      "post": {
+        "operationId": "complete",
+        "summary": "Complete the build with its exit code",
+        "description": "As http://artifacts/exit; terminal (GUEST-55).",
+        "x-requirements": [
+          "GUEST-39",
+          "GUEST-21",
+          "GUEST-54"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "description": "The exit code, a decimal integer; 0 when absent or empty.",
+            "schema": {
+              "type": "string",
+              "pattern": "^-?[0-9]+$"
+            },
+            "x-requirements": [
+              "GUEST-22",
+              "GUEST-39"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The build is complete. Empty body.",
+            "x-requirements": [
+              "GUEST-39"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
