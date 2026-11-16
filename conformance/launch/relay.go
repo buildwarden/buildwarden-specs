@@ -227,6 +227,24 @@ func ociRun(o *target.OCI, name, resolvConf string, env, args []string) []string
 func ociInspect(name string) []string { return []string{"inspect", "--format", "{{.State.Pid}}", name} }
 func ociRemove(name string) []string  { return []string{"rm", "--force", name} }
 
+// removeContainer removes the container name with the runtime rt. A container
+// that is already being removed, or is gone, is not an error: a relay that
+// exits by itself after a failed start, as the specification requires, has
+// its container removed by the runtime's --rm while the run command has not
+// yet returned, and the runtime then refuses a second removal.
+func removeContainer(rt, name string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), CommandLimit)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, rt, ociRemove(name)...).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if msg := strings.ToLower(string(out)); strings.Contains(msg, "already in progress") || strings.Contains(msg, "no such container") {
+		return nil
+	}
+	return fmt.Errorf("removing the container %s: %w: %s", name, err, out)
+}
+
 func (in *relayInstance) startOCI(ctx context.Context) error {
 	o := in.f.OCI
 	v := map[string]string{"claim": ociClaim, "token": in.endpoint.Token}
@@ -319,8 +337,9 @@ func (in *relayInstance) ReadBack(context.Context) (string, error) {
 
 // Stop ends the relay, and then removes the instance's links and namespaces.
 // An exec relay is interrupted, and killed if it has not exited within
-// StopGrace; an oci relay's container is removed by its runtime, and the
-// runtime's process killed if it has not exited within StopGrace after.
+// StopGrace; an oci relay's container is removed by its runtime (one the
+// runtime is already removing is left to it), and the runtime's process
+// killed if it has not exited within StopGrace after.
 func (in *relayInstance) Stop() error {
 	var errs []error
 	if in.cmd != nil {
@@ -328,11 +347,8 @@ func (in *relayInstance) Stop() error {
 		case <-in.done:
 		default:
 			if in.f.Launcher == "oci" {
-				ctx, cancel := context.WithTimeout(context.Background(), CommandLimit)
-				out, err := exec.CommandContext(ctx, in.cmd.Path, ociRemove(in.sb.Names().Container)...).CombinedOutput()
-				cancel()
-				if err != nil {
-					errs = append(errs, fmt.Errorf("removing the container %s: %w: %s", in.sb.Names().Container, err, out))
+				if err := removeContainer(in.cmd.Path, in.sb.Names().Container); err != nil {
+					errs = append(errs, err)
 				}
 			} else if err := in.cmd.Process.Signal(os.Interrupt); err != nil {
 				_ = in.cmd.Process.Kill()

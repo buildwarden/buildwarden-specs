@@ -3,7 +3,11 @@ package launch
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -13,7 +17,7 @@ import (
 
 // The relay launchers' tests are tier 0: they check the command lines the
 // launchers build and what an attachment declares, and none builds a sandbox
-// or calls a container runtime.
+// or calls a container runtime: a runtime's answers are played by a script.
 
 const (
 	execRelay = `role = "relay"
@@ -86,6 +90,46 @@ func TestOCIRun(t *testing.T) {
 	}
 	if ociClaim != "0.0.0.0:8301" || sandbox.ClaimPort != 8301 {
 		t.Errorf("ociClaim %q", ociClaim)
+	}
+}
+
+// TestRemoveContainer checks that a container the runtime is already removing,
+// or has removed, is not an error when the harness removes it: an oci relay
+// that exits by itself after a failed start is removed by the runtime's --rm,
+// and its case does not fail for it (H1 of the hosted run 43841571312).
+func TestRemoveContainer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the runtime's script is a shell script")
+	}
+	tests := []struct {
+		name, out, wantErr string
+		code               int
+	}{
+		{name: "removed", out: "n"},
+		{name: "docker, already being removed", out: "Error response from daemon: removal of container n is already in progress", code: 1},
+		{name: "docker, gone", out: "Error response from daemon: No such container: n", code: 1},
+		{name: "podman, gone", out: "Error: no container with name or ID \"n\" found: no such container", code: 1},
+		{name: "another error", out: "Error response from daemon: permission denied", code: 1, wantErr: "removing the container n: exit status 1: Error response from daemon: permission denied"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := filepath.Join(t.TempDir(), "docker")
+			args := filepath.Join(filepath.Dir(rt), "args")
+			script := "#!/bin/sh\necho \"$@\" > '" + args + "'\necho '" + strings.ReplaceAll(tt.out, "'", "'\\''") + "' >&2\nexit " + strconv.Itoa(tt.code) + "\n"
+			if err := os.WriteFile(rt, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			err := removeContainer(rt, "n")
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Errorf("removeContainer: %v", err)
+			case tt.wantErr != "" && (err == nil || strings.TrimSpace(err.Error()) != tt.wantErr):
+				t.Errorf("removeContainer = %v, want %q", err, tt.wantErr)
+			}
+			if b, err := os.ReadFile(args); err != nil || string(b) != "rm --force n\n" {
+				t.Errorf("the runtime ran with %q (%v), want rm --force n", b, err)
+			}
+		})
 	}
 }
 
