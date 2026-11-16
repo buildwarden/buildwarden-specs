@@ -15,6 +15,8 @@ func TestUsage(t *testing.T) {
 		{"an unknown subcommand", []string{"layout"}},
 		{"release with no base", []string{"release", "relay-claim"}},
 		{"release with an unknown flag", []string{"release", "-head", "x"}},
+		{"tag with no main", []string{"tag", "relay-claim/v0.1.0", "relay-claim"}},
+		{"tag with no tag", []string{"tag", "-main", "origin/main"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer

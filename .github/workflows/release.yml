@@ -1,0 +1,104 @@
+name: release
+
+# A release is a tag <directory>/vX.Y.Z on main, one directory to a tag. For a
+# specification's tag this builds its command, bw-conformance-<directory>, with
+# go install <command>@<tag> for three operating systems and two
+# architectures, which builds exactly what the tag serves with the versions its
+# go.mod lists, and attaches the binaries to the tag's release with
+# SHA256SUMS. A tag conformance/vX.Y.Z releases the harness, which has no
+# binary: its run checks the tag and attaches nothing.
+#
+# A push of more than three tags starts no run, so tags are pushed one to a
+# push, the harness's first: go install resolves the harness version a
+# specification names. A run that was missed or failed is made again by hand
+# for the tag that exists, which is never moved.
+on:
+  push:
+    tags: ['*/v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'An existing tag, <directory>/vX.Y.Z'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: conformance/go.mod
+          cache: false
+
+      - name: The tag is on main and is the version at the head of its CHANGELOG.md
+        run: |
+          go run ./conformance/internal/speccheck tag -main origin/main "$TAG" \
+            bootstrap-config collector-inputs collector-outputs executor-initialize relay-claim relay-guest-api
+          dir=${TAG%/*}
+          version=${TAG##*/}
+          echo "DIR=$dir" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the command for each operating system and architecture
+        if: env.DIR != 'conformance'
+        run: |
+          set -eu
+          cmd="github.com/buildwarden/buildwarden-specs/$DIR/cmd/bw-conformance-$DIR"
+          out="$RUNNER_TEMP/assets"
+          mkdir -p "$out"
+          export GOMODCACHE="$RUNNER_TEMP/modcache"
+          # Outside the checkout, so no go.work applies: the build is the
+          # tag's module as the proxy serves it, as a go.mod that names the
+          # tag gets it.
+          cd "$RUNNER_TEMP"
+          for goos in linux darwin windows; do
+            for goarch in amd64 arm64; do
+              gopath="$RUNNER_TEMP/gopath-$goos-$goarch"
+              GOWORK=off GOPATH="$gopath" GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
+                go install "$cmd@$TAG"
+              ext=""
+              [ "$goos" = windows ] && ext=".exe"
+              # go install puts a binary for the runner's own platform in
+              # bin, and one for another in bin/<goos>_<goarch>.
+              bin="$gopath/bin/${goos}_${goarch}/bw-conformance-$DIR$ext"
+              if [ "$goos/$goarch" = "$(go env GOHOSTOS)/$(go env GOHOSTARCH)" ]; then
+                bin="$gopath/bin/bw-conformance-$DIR$ext"
+              fi
+              cp "$bin" "$out/bw-conformance-${DIR}_${VERSION}_${goos}_${goarch}$ext"
+            done
+          done
+          cd "$out"
+          sha256sum bw-conformance-* > SHA256SUMS
+          cat SHA256SUMS
+          go version -m "bw-conformance-${DIR}_${VERSION}_linux_amd64"
+
+      - name: Attach the binaries to the tag's release
+        if: env.DIR != 'conformance'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          # The release notes are the version's section of the CHANGELOG.md.
+          awk -v v="## $VERSION" '$0 == v { on = 1; next } on && /^## / { exit } on' \
+            "$DIR/CHANGELOG.md" > "$RUNNER_TEMP/notes.md"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" --clobber "$RUNNER_TEMP"/assets/*
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" \
+              --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/assets/*
+          fi

@@ -1,0 +1,131 @@
+name: implementations
+
+# The newest release of each specification's suite against each known
+# implementation at its newest release, as a table in the run's summary. It
+# is not a merge gate and runs on no pull request: a specification change is
+# merged before the code that implements it.
+#
+# The one implementation run so far is the Go relay's image. Its target file
+# is kept beside it, in buildwarden/buildwarden: this workflow takes
+# tools/conformance/targets/relay-oci.toml from that repository's newest
+# release tag, pulls the image that release published,
+# ghcr.io/buildwarden/relay:<tag>, under the name the target file names, and
+# runs each specification's newest released binary, checked against its
+# release's SHA256SUMS. A release of that repository that has no such file
+# is named so in the table, and nothing is run against it.
+on:
+  schedule:
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SPECS: bootstrap-config collector-inputs collector-outputs executor-initialize relay-claim relay-guest-api
+      IMPLEMENTATION: buildwarden/buildwarden
+      IMAGE: ghcr.io/buildwarden/relay
+      TARGET: tools/conformance/targets/relay-oci.toml
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Each specification's newest released binary, checked against its SHA256SUMS
+        run: |
+          set -eu
+          case "$RUNNER_ARCH" in
+            X64) arch=amd64 ;;
+            ARM64) arch=arm64 ;;
+            *) echo "no release binary is built for the runner's architecture $RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/bin"
+          : > "$RUNNER_TEMP/suites"
+          for dir in $SPECS; do
+            version=$(git tag --list "$dir/v*" | sed "s|^$dir/||" \
+              | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -n 1 || true)
+            if [ -z "$version" ]; then
+              echo "$dir none" >> "$RUNNER_TEMP/suites"
+              continue
+            fi
+            asset="bw-conformance-${dir}_${version}_linux_${arch}"
+            work="$RUNNER_TEMP/download/$dir"
+            mkdir -p "$work"
+            gh release download "$dir/$version" -D "$work" -p "$asset" -p SHA256SUMS
+            line=$(grep -E "^[0-9a-f]{64}  $asset\$" "$work/SHA256SUMS") \
+              || { echo "$dir/$version: SHA256SUMS has no line for $asset" >&2; exit 1; }
+            (cd "$work" && printf '%s\n' "$line" | sha256sum -c -)
+            install -m 0755 "$work/$asset" "$RUNNER_TEMP/bin/bw-conformance-$dir"
+            echo "$dir $version" >> "$RUNNER_TEMP/suites"
+          done
+          cat "$RUNNER_TEMP/suites"
+
+      - name: The Go relay's newest release, its target file and its image
+        run: |
+          set -eu
+          tag=$(git ls-remote --tags --refs "https://github.com/$IMPLEMENTATION" 'v*' | awk '{ print $2 }' \
+            | sed 's|^refs/tags/||' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -n 1)
+          [ -n "$tag" ] || { echo "$IMPLEMENTATION has no release tag" >&2; exit 1; }
+          echo "RELAY_TAG=$tag" >> "$GITHUB_ENV"
+          status=$(curl -sS -o "$RUNNER_TEMP/relay-oci.toml" -w '%{http_code}' \
+            "https://raw.githubusercontent.com/$IMPLEMENTATION/$tag/$TARGET")
+          case "$status" in
+            200) ;;
+            404) echo "$IMPLEMENTATION $tag has no $TARGET: nothing is run against it"
+                 echo "RELAY_TARGET=none" >> "$GITHUB_ENV"; exit 0 ;;
+            *) echo "fetching $TARGET at $tag: HTTP $status" >&2; exit 1 ;;
+          esac
+          echo "RELAY_TARGET=$RUNNER_TEMP/relay-oci.toml" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/relay-oci.toml"
+          name=$(python3 -c 'import sys, tomllib; print(tomllib.load(open(sys.argv[1], "rb"))["oci"]["image"])' \
+            "$RUNNER_TEMP/relay-oci.toml")
+          docker pull "$IMAGE:$tag"
+          docker tag "$IMAGE:$tag" "$name"
+
+      - name: Run each suite against the Go relay
+        run: |
+          set -u
+          summary="$GITHUB_STEP_SUMMARY"
+          {
+            echo "## The Go relay, $IMPLEMENTATION $RELAY_TAG, image $IMAGE:$RELAY_TAG"
+            echo
+            echo "| Specification | Its newest release | Result | Verdicts |"
+            echo "|---|---|---|---|"
+          } >> "$summary"
+          mkdir -p "$RUNNER_TEMP/reports"
+          failed=0
+          while read -r dir version; do
+            if [ "$version" = none ]; then
+              echo "| \`$dir\` | none yet | not run: no release | |" >> "$summary"
+              continue
+            fi
+            if [ "$RELAY_TARGET" = none ]; then
+              echo "| \`$dir\` | $version | not run: $RELAY_TAG has no \`$TARGET\` | |" >> "$summary"
+              continue
+            fi
+            report="$RUNNER_TEMP/reports/$dir.txt"
+            # The oci launcher's sandbox needs root.
+            sudo "$RUNNER_TEMP/bin/bw-conformance-$dir" run -target "$RELAY_TARGET" > "$report" 2>&1
+            status=$?
+            cat "$report"
+            case $status in
+              0) result=pass ;;
+              *) result="fail (exit $status)"; failed=1 ;;
+            esac
+            echo "| \`$dir\` | $version | $result | $(tail -n 1 "$report" | tr '|' '/') |" >> "$summary"
+          done < "$RUNNER_TEMP/suites"
+          exit $failed
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: implementations-go-relay
+          path: ${{ runner.temp }}/reports/
+          if-no-files-found: ignore

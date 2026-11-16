@@ -16,16 +16,16 @@ page says which package implements each seam there.
 Each directory is one specification: its document `v1.md`, its JSON Schemas
 and OpenAPI descriptions, its suite in `cases/`, the command that runs the
 suite, and its `CHANGELOG.md`. A release of a specification is a tag
-`<directory>/vX.Y.Z`; none is released yet.
+`<directory>/vX.Y.Z` on `main` (**Releases**, below).
 
 | Seam | Specification | Requirement prefix | Newest release |
 |---|---|---|---|
-| 1, the claim | [`relay-claim`](relay-claim/v1.md) | `CLAIM` | none yet |
-| 2, the outputs a collector stores | [`collector-outputs`](collector-outputs/v1.md) | `COLLOUT` | none yet |
-| 2, the inputs and signals a collector serves | [`collector-inputs`](collector-inputs/v1.md) | `COLLIN` | none yet |
-| 3, the relay's guest API | [`relay-guest-api`](relay-guest-api/v1.md) | `GUEST` | none yet |
-| 5, the executor's `initialize` | [`executor-initialize`](executor-initialize/v1.md) | `INIT` | none yet |
-| 6, the bootstrap config | [`bootstrap-config`](bootstrap-config/v1.md) | `BOOTCFG` | none yet |
+| 1, the claim | [`relay-claim`](relay-claim/v1.md) | `CLAIM` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/relay-claim/v0.1.0) |
+| 2, the outputs a collector stores | [`collector-outputs`](collector-outputs/v1.md) | `COLLOUT` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/collector-outputs/v0.1.0) |
+| 2, the inputs and signals a collector serves | [`collector-inputs`](collector-inputs/v1.md) | `COLLIN` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/collector-inputs/v0.1.0) |
+| 3, the relay's guest API | [`relay-guest-api`](relay-guest-api/v1.md) | `GUEST` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/relay-guest-api/v0.1.0) |
+| 5, the executor's `initialize` | [`executor-initialize`](executor-initialize/v1.md) | `INIT` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/executor-initialize/v0.1.0) |
+| 6, the bootstrap config | [`bootstrap-config`](bootstrap-config/v1.md) | `BOOTCFG` | [`v0.1.0`](https://github.com/buildwarden/buildwarden-specs/releases/tag/bootstrap-config/v0.1.0) |
 
 `conformance/` is not a specification: it is the harness the six suites share,
 a Go module released under its own tags `conformance/vX.Y.Z`, with no
@@ -171,8 +171,43 @@ These hold in every specification directory.
   can name it.
 - **Versions.** Each directory's `CHANGELOG.md` starts with the version its
   next release will be, `## vX.Y.Z`, newest first; a pull request that changes
-  a directory adds that version. The command reads its version from there. A
+  a directory adds that version, and names it in the directory's row of the
+  index above. The command reads its version from there. A
   specification's `go.mod` names the harness version it is released with.
+
+## Releases
+
+A release is a tag `<directory>/vX.Y.Z` on a commit of `main`, one directory
+to a tag, at the version at the head of that directory's `CHANGELOG.md`. A tag
+is never moved: a fault found after a release is fixed by a pull request and a
+new release of the directory at fault.
+
+- **A specification's release** carries its command. The `release` workflow
+  builds `bw-conformance-<directory>` with
+  `go install github.com/buildwarden/buildwarden-specs/<directory>/cmd/bw-conformance-<directory>@<directory>/vX.Y.Z`,
+  with `CGO_ENABLED=0`, for Linux, macOS and Windows on `amd64` and `arm64`,
+  and attaches the six binaries,
+  `bw-conformance-<directory>_vX.Y.Z_<os>_<arch>` (`.exe` on Windows), with
+  `SHA256SUMS`. A binary carries the harness its release names, and so does a
+  build from a `go.mod` that names the tag: `go install` builds exactly what
+  the tag serves, with the versions its `go.mod` lists.
+- **The harness's release**, `conformance/vX.Y.Z`, attaches nothing. Its tag
+  is pushed before the tags of the specifications that name it, because
+  `go install` resolves it.
+- **Tags are pushed one to a push,** because a push of more than three tags
+  starts no workflow run. A run that was missed or that failed is made again
+  by hand, `release` with the existing tag as its input, without touching
+  the tag.
+
+The `implementations` workflow, weekly and on demand, runs the newest release
+of each specification's suite against each known implementation at its newest
+release, and publishes the table in its run's summary. It is not a merge gate:
+a specification change is merged before the code that implements it. It runs
+the Go relay's image, `ghcr.io/buildwarden/relay:<tag>` at
+buildwarden/buildwarden's newest release tag, with the target file
+`tools/conformance/targets/relay-oci.toml` of that release, and each released
+binary checked against its `SHA256SUMS`; a release that has no such file is
+named so in the table and nothing is run against it.
 
 ## Working here
 

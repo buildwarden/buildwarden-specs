@@ -5,11 +5,15 @@
 //	speccheck docs <directory>...
 //	speccheck modules <directory>...
 //	speccheck release -base <ref> <directory>...
+//	speccheck tag -main <ref> <tag> <directory>...
 //
 // The directories are the specifications'; the harness's is implied where a
 // check reads it. docs runs the checks that read documents only; modules,
 // the module checks a parser can make; release, the release checks of the
-// change from the merge base of <ref> and HEAD to the working tree.
+// change from the merge base of <ref> and HEAD to the working tree. tag is
+// the release workflow's check of the tag it releases: the checkout is at
+// the tagged commit, that commit is on <ref>, and the tag is the version at
+// the head of its directory's CHANGELOG.md.
 package main
 
 import (
@@ -31,7 +35,7 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage:\n  speccheck docs <directory>...\n  speccheck modules <directory>...\n  speccheck release -base <ref> <directory>...\n"
+	usage := "usage:\n  speccheck docs <directory>...\n  speccheck modules <directory>...\n  speccheck release -base <ref> <directory>...\n  speccheck tag -main <ref> <tag> <directory>...\n"
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -52,6 +56,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		err = release(repo, *base, fset.Args())
+	case "tag":
+		fset := flag.NewFlagSet("tag", flag.ContinueOnError)
+		fset.SetOutput(stderr)
+		onto := fset.String("main", "", "the ref the tagged commit must be on, such as origin/main")
+		if fset.Parse(args[1:]) != nil || *onto == "" || fset.NArg() == 0 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		err = tag(repo, *onto, fset.Arg(0), fset.Args()[1:])
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -98,6 +111,35 @@ func release(repo fs.FS, base string, specs []string) error {
 		})
 	}
 	return check.Release(repo, dirs)
+}
+
+// tag gathers from git what the tag check needs beside the files: that the
+// working tree is the tagged commit's, so the files read are the release's,
+// and that the commit is on onto, the ref of main.
+func tag(repo fs.FS, onto, name string, specs []string) error {
+	commit, err := git("rev-parse", "--verify", "refs/tags/"+name+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("the tag %s: %w", name, err)
+	}
+	head, err := git("rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(head) != strings.TrimSpace(commit) {
+		return fmt.Errorf("the checkout is at %s and the tag %s at %s: check out the tag", strings.TrimSpace(head), name, strings.TrimSpace(commit))
+	}
+	dirty, err := git("status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(dirty) != "" {
+		return fmt.Errorf("the working tree differs from the tag %s:\n%s", name, strings.TrimRight(dirty, "\n"))
+	}
+	if _, err := git("merge-base", "--is-ancestor", strings.TrimSpace(commit), onto); err != nil {
+		return fmt.Errorf("the tag %s is not on %s: a release is a tag on main (%w)", name, onto, err)
+	}
+	_, _, err = check.Tag(repo, name, specs)
+	return err
 }
 
 func git(args ...string) (string, error) {
