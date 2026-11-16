@@ -1,0 +1,11 @@
+# The requirements of relay-claim/v1.md that no case of its suite checks, one to a
+# line: the identifier, a space and the reason (see the README's conventions).
+CLAIM-1 That a relay opens no connection to the claimant is an absence over the relay's whole life; the suite sees only the connections it is offered, never every one the relay might open.
+CLAIM-6 A constant-time comparison cannot be shown from outside by a suite whose verdicts may not depend on timing (TEST-04).
+CLAIM-10 How the token reaches the relay is its launcher's, before the protocol starts; a suite sees the token's effect (CLAIM-5), not its channel.
+CLAIM-20 Whether a claimant had a value for an optional field is its own state; a suite sees only the claim, and a member sent with an empty value may be a value the claimant has.
+CLAIM-27 Which roots the relay's system roots are is its host's, and no target declares one the harness can present, so no origin of the suite is trusted by them: a case cannot tell a relay that keeps or drops them.
+CLAIM-34 What a claimant does with a 200 that has no ca_cert is its own: it sends nothing more that the protocol names, so a suite has no reply of the claimant's to observe.
+CLAIM-35 That a claimant does not retry a refused request is an absence over its whole life; a suite that waited a while for a retry would give a verdict that depends on timing (TEST-04).
+CLAIM-36 Which addresses and routes a vm-mode relay's other interfaces hold is its host's, and no target declares them, so a suite cannot choose a build_link that collides with one.
+CLAIM-45 The design's harness polls the relay's /health before its first build-side request and asserts nothing about the build-facing listeners at the moment of the claim's 200 (The harness; Known divergences, D19), so no case checks what they serve then.

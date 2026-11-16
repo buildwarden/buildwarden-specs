@@ -1,0 +1,27 @@
+name: ci
+
+# Everything ci checks is `make check`, so a checkout runs exactly what this
+# workflow runs.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # The release checks measure the change from the merge base with main
+      # and read the tags, so the checkout has the whole history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: conformance/go.mod
+      - run: make check

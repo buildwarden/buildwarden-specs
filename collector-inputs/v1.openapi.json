@@ -1,0 +1,382 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "collector-inputs",
+    "version": "v1",
+    "description": "The inputs and signals a collector serves a relay. The requirements in v1.md are the contract; this file describes the paths, methods, headers, bodies and statuses they state.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "{collector_url}",
+      "description": "The base URL the claim names; http://collector.tunnel selects the tunnel (COLLIN-3, COLLIN-4).",
+      "variables": {
+        "collector_url": {
+          "default": "http://collector.tunnel"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "session": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The session's collector token, where it has one (COLLIN-5, COLLIN-7, COLLIN-9)."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The session's token is missing or wrong.",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "type": "string",
+              "const": "unauthorized\n"
+            }
+          }
+        },
+        "x-requirements": [
+          "COLLIN-5"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/v1/build-script": {
+      "get": {
+        "summary": "Fetch the build script",
+        "x-requirements": [
+          "COLLIN-13",
+          "COLLIN-28"
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's build script.",
+            "x-requirements": [
+              "COLLIN-13"
+            ],
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "description": "The input's bytes."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The session has no build script.",
+            "x-requirements": [
+              "COLLIN-13"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/bootstrap": {
+      "get": {
+        "summary": "Fetch the bootstrap config",
+        "description": "The body is the bootstrap config that the bootstrap-config specification defines, byte for byte (COLLIN-14).",
+        "x-requirements": [
+          "COLLIN-14",
+          "COLLIN-28"
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's bootstrap config.",
+            "x-requirements": [
+              "COLLIN-14"
+            ],
+            "content": {
+              "application/json": {}
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The session has no bootstrap config, which reads as the empty one.",
+            "x-requirements": [
+              "COLLIN-14"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/context/": {
+      "get": {
+        "summary": "List the build context",
+        "description": "The empty context path, the context's root: a listing of every file in the context (COLLIN-17).",
+        "x-requirements": [
+          "COLLIN-17",
+          "COLLIN-29"
+        ],
+        "responses": {
+          "200": {
+            "description": "A listing of the files of the context.",
+            "x-requirements": [
+              "COLLIN-17"
+            ],
+            "headers": {
+              "Warden-Context": {
+                "description": "What the reply holds: a listing.",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "list"
+                },
+                "x-requirements": [
+                  "COLLIN-17"
+                ]
+              }
+            },
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "The paths of the files beneath the directory, relative to the context's root, sorted, each followed by a line feed."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The session has no build context.",
+            "x-requirements": [
+              "COLLIN-18"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/context/{path}": {
+      "get": {
+        "summary": "Fetch a file of the build context, or list a directory",
+        "description": "path is a slash path of several segments, each percent-encoded, with a trailing / for a directory when the build gave one (COLLIN-15, COLLIN-29).",
+        "x-requirements": [
+          "COLLIN-15",
+          "COLLIN-16",
+          "COLLIN-17",
+          "COLLIN-18",
+          "COLLIN-19",
+          "COLLIN-29"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The context path: a safe name whose segments end with a letter or a digit, less one trailing / (COLLIN-15). It spans path segments.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "x-multi-segment": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A file (Warden-Context: file) or a listing (Warden-Context: list).",
+            "x-requirements": [
+              "COLLIN-16",
+              "COLLIN-17"
+            ],
+            "headers": {
+              "Warden-Context": {
+                "description": "file for a file's bytes, list for a listing (COLLIN-16, COLLIN-17).",
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "list"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "description": "A file's bytes, with Warden-Context: file."
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "description": "The paths of the files beneath the directory, relative to the context's root, sorted, each followed by a line feed."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "The context path is not safe.",
+            "x-requirements": [
+              "COLLIN-15"
+            ]
+          },
+          "404": {
+            "description": "The path names nothing, names a file with a trailing /, names a symbolic link out of the context, or the session has no context.",
+            "x-requirements": [
+              "COLLIN-18",
+              "COLLIN-19"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/ready": {
+      "post": {
+        "summary": "The relay is up",
+        "x-requirements": [
+          "COLLIN-21",
+          "COLLIN-31",
+          "COLLIN-33"
+        ],
+        "responses": {
+          "200": {
+            "description": "Received.",
+            "x-requirements": [
+              "COLLIN-21"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/heartbeat": {
+      "post": {
+        "summary": "The build is alive",
+        "x-requirements": [
+          "COLLIN-22",
+          "COLLIN-30",
+          "COLLIN-33"
+        ],
+        "responses": {
+          "200": {
+            "description": "Received.",
+            "x-requirements": [
+              "COLLIN-22"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/complete": {
+      "post": {
+        "summary": "The build has ended",
+        "description": "The first completion of a session is its result (COLLIN-24). The collector may close the connection before it replies (COLLIN-2).",
+        "x-requirements": [
+          "COLLIN-23",
+          "COLLIN-24",
+          "COLLIN-32",
+          "COLLIN-34",
+          "COLLIN-35"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "v1.complete.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Received.",
+            "x-requirements": [
+              "COLLIN-23",
+              "COLLIN-24"
+            ]
+          },
+          "400": {
+            "description": "The body is not JSON, is a JSON array, string, number or boolean, or has one of the three members with a value of another type that is not null; or, as the collector may, an exit_code with a fraction or an exponent or outside the signed 64-bit range.",
+            "x-requirements": [
+              "COLLIN-23"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "summary": "The session's status",
+        "description": "Not called by a relay; specified for a collector with one session (COLLIN-26).",
+        "x-requirements": [
+          "COLLIN-6",
+          "COLLIN-26"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Running, or the first completion and when it was received.",
+            "x-requirements": [
+              "COLLIN-26"
+            ],
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "v1.status.schema.json"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "summary": "Liveness",
+        "description": "Not called by a relay (COLLIN-27).",
+        "x-requirements": [
+          "COLLIN-6",
+          "COLLIN-27"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The collector is up.",
+            "x-requirements": [
+              "COLLIN-27"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "const": "ok\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/buildwarden/buildwarden-specs/collector-inputs/v1.status.schema.json",
+  "title": "collector-inputs v1: the reply to GET /v1/status",
+  "description": "Before the session's completion, that the build is running; after it, the first completion and when it was received (COLLIN-26).",
+  "oneOf": [
+    {
+      "title": "Running",
+      "type": "object",
+      "properties": {
+        "state": {"const": "running"}
+      },
+      "required": ["state"],
+      "additionalProperties": false
+    },
+    {
+      "title": "Completed",
+      "type": "object",
+      "properties": {
+        "exit_code": {"type": "integer"},
+        "message": {"type": "string"},
+        "error": {"type": "string"},
+        "received_at": {
+          "description": "When the collector received the completion, an RFC 3339 date and time.",
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["exit_code", "message", "error", "received_at"],
+      "additionalProperties": false
+    }
+  ]
+}

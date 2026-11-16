@@ -1,0 +1,178 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "relay-claim",
+    "version": "v1",
+    "summary": "How a claimant claims a relay: the tunnel, the claim and its reply.",
+    "description": "The claim endpoint of a relay, as a conforming claimant uses it. The requirements of relay-claim/v1.md are normative and this file describes only what they state; what it cannot say (the 405 for any other method and what a relay answers on any other path, the HTTP/2 that follows the tunnel's upgrade, one claim and one tunnel for a relay's life, the ordering at the claim, the differences by mode, and the known divergences) is in that document alone.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{relay}:{port}",
+      "description": "The relay's claim endpoint, over TCP (CLAIM-2).",
+      "variables": {
+        "relay": {
+          "default": "relay",
+          "description": "An address of the relay the claimant can reach."
+        },
+        "port": {
+          "default": "8301",
+          "description": "The port whoever started the relay chose; 8301 is the Go relay's default."
+        }
+      }
+    }
+  ],
+  "security": [
+    {"claimToken": []},
+    {}
+  ],
+  "paths": {
+    "/v1/tunnel": {
+      "post": {
+        "operationId": "openTunnel",
+        "summary": "Open the tunnel the relay reaches the collector on",
+        "description": "Upgrades the connection; from the end of the 101 on it carries HTTP/2 with prior knowledge, the relay as the client and the claimant as the server of the collector protocol (CLAIM-13).",
+        "x-requirements": ["CLAIM-11", "CLAIM-12", "CLAIM-13", "CLAIM-14"],
+        "parameters": [
+          {
+            "name": "Connection",
+            "in": "header",
+            "required": true,
+            "schema": {"const": "Upgrade"},
+            "x-requirements": ["CLAIM-11"]
+          },
+          {
+            "name": "Upgrade",
+            "in": "header",
+            "required": true,
+            "schema": {"const": "warden-tunnel"},
+            "x-requirements": ["CLAIM-11"]
+          },
+          {
+            "name": "Content-Length",
+            "in": "header",
+            "required": true,
+            "schema": {"const": "0"},
+            "x-requirements": ["CLAIM-11"]
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Switching Protocols: the connection is now the tunnel.",
+            "x-requirements": ["CLAIM-12", "CLAIM-13"],
+            "headers": {
+              "Connection": {
+                "required": true,
+                "schema": {"const": "Upgrade"}
+              },
+              "Upgrade": {
+                "required": true,
+                "schema": {"const": "warden-tunnel"}
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The relay has accepted a tunnel before, whether or not that tunnel is still open; or a claim is being processed, or one has succeeded. The body is `tunnel already open`.",
+            "x-requirements": ["CLAIM-15", "CLAIM-51"],
+            "content": {
+              "text/plain": {
+                "schema": {"type": "string", "pattern": "^tunnel already open\\n?$"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/claim": {
+      "post": {
+        "operationId": "claim",
+        "summary": "Claim the relay for one build",
+        "x-requirements": ["CLAIM-17", "CLAIM-21", "CLAIM-22", "CLAIM-23", "CLAIM-24", "CLAIM-25", "CLAIM-26", "CLAIM-27", "CLAIM-28", "CLAIM-29", "CLAIM-30", "CLAIM-31", "CLAIM-32", "CLAIM-52"],
+        "requestBody": {
+          "required": true,
+          "description": "The claim, at most 16 MiB (CLAIM-52).",
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "v1.config.schema.json"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The claim is accepted and the relay has started (CLAIM-44). The relay need not have had the collector's reply to PUT /v1/ledger (CLAIM-23).",
+            "x-requirements": ["CLAIM-33", "CLAIM-44"],
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "v1.identity.schema.json"}
+              }
+            }
+          },
+          "400": {
+            "description": "The claim is refused and the relay stays claimable (CLAIM-48): `invalid claim: ...` for a claim that does not decode or breaks a rule of a field, `claim refused: ...` for one the relay's mode cannot apply.",
+            "x-requirements": ["CLAIM-18", "CLAIM-19", "CLAIM-21", "CLAIM-22", "CLAIM-29", "CLAIM-30", "CLAIM-32", "CLAIM-36", "CLAIM-38", "CLAIM-40", "CLAIM-48", "CLAIM-49", "CLAIM-51", "CLAIM-52"],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(invalid claim|claim refused): "
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "Another claim is being processed, or one has succeeded. The body is `already claimed`. After a 200 the relay may instead close the connection with no reply (CLAIM-46).",
+            "x-requirements": ["CLAIM-46", "CLAIM-51"],
+            "content": {
+              "text/plain": {
+                "schema": {"type": "string", "pattern": "^already claimed\\n?$"}
+              }
+            }
+          },
+          "500": {
+            "description": "The relay accepted the claim and could not start with it; it is spent (CLAIM-50). Among the causes: an unusable environment, or a status other than 200 to PUT /v1/environment; a collector_url the relay cannot request, or a collector it cannot reach; a tunnel that has closed. A refusal of PUT /v1/ledger need not be one (CLAIM-23).",
+            "x-requirements": ["CLAIM-22", "CLAIM-23", "CLAIM-28", "CLAIM-50", "CLAIM-51"],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^relay start failed: "
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "claimToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The claim token, when the relay was started with one (CLAIM-5, CLAIM-8). It is sent as `Authorization: Bearer <token>`, the scheme spelled exactly `Bearer`; a relay need accept no other spelling (CLAIM-8). A relay started without one takes any request (CLAIM-9)."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The relay was started with a claim token and the request does not carry it. Nothing is consumed (CLAIM-7).",
+        "x-requirements": ["CLAIM-5", "CLAIM-7", "CLAIM-51"],
+        "content": {
+          "text/plain": {
+            "schema": {"type": "string", "pattern": "^unauthorized\\n?$"}
+          }
+        }
+      }
+    }
+  }
+}

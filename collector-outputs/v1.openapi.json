@@ -1,0 +1,328 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "collector-outputs",
+    "version": "v1",
+    "description": "The outputs a relay sends a collector to store. The requirements in v1.md are the contract; this file describes the paths, methods, headers, bodies and statuses they state.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "{collector_url}",
+      "description": "The base URL the claim names; http://collector.tunnel selects the tunnel (COLLOUT-3, COLLOUT-4).",
+      "variables": {
+        "collector_url": {
+          "default": "http://collector.tunnel"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "session": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The session's collector token, where it has one (COLLOUT-5, COLLOUT-7, COLLOUT-9)."
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "The session's token is missing or wrong.",
+        "content": {
+          "text/plain": {
+            "schema": {
+              "type": "string",
+              "const": "unauthorized\n"
+            }
+          }
+        },
+        "x-requirements": [
+          "COLLOUT-5"
+        ]
+      }
+    }
+  },
+  "paths": {
+    "/v1/artifacts/{name}": {
+      "put": {
+        "summary": "Store an artifact",
+        "description": "Streams the bytes of an artifact the build posted under name. The name is a slash path of several segments, each percent-encoded (COLLOUT-11, COLLOUT-12, COLLOUT-14).",
+        "x-requirements": [
+          "COLLOUT-13",
+          "COLLOUT-14",
+          "COLLOUT-22"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "*/*": {
+              "schema": {
+                "description": "The bytes of the output, streamed."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. The body is empty.",
+            "x-requirements": [
+              "COLLOUT-13"
+            ]
+          },
+          "400": {
+            "description": "The name is not an artifact's name; nothing is stored.",
+            "x-requirements": [
+              "COLLOUT-14"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body exceeds one of the collector's limits; nothing of it is stored where COLLOUT-30 says so.",
+            "x-requirements": [
+              "COLLOUT-30"
+            ]
+          },
+          "5XX": {
+            "description": "The collector has not stored the output, for a reason of its own.",
+            "x-requirements": [
+              "COLLOUT-24"
+            ]
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The artifact's name: a safe name whose segments start and end with a letter or a digit (COLLOUT-14). It spans path segments.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "x-multi-segment": true
+          }
+        ]
+      }
+    },
+    "/v1/captures/{name}": {
+      "put": {
+        "summary": "Store a captured payload",
+        "description": "A payload the relay captured, sent with no length in advance and with the request trailer Warden-Hash, declared in the Trailer header field; the trailer follows the body and so is not a header this file can describe: the BLAKE2b-256 of the body as 64 hexadecimal digits (COLLOUT-15, COLLOUT-17, COLLOUT-18). The collector stores it under the name with every byte outside [A-Za-z0-9._-] replaced by _ (COLLOUT-16).",
+        "x-requirements": [
+          "COLLOUT-15",
+          "COLLOUT-16",
+          "COLLOUT-17",
+          "COLLOUT-18",
+          "COLLOUT-22"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "*/*": {
+              "schema": {
+                "description": "The bytes of the output, streamed."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. The body is empty.",
+            "x-requirements": [
+              "COLLOUT-15"
+            ]
+          },
+          "400": {
+            "description": "The name is empty, longer than 255 bytes or made only of dots; nothing is stored.",
+            "x-requirements": [
+              "COLLOUT-16"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body exceeds one of the collector's limits; nothing of it is stored where COLLOUT-30 says so.",
+            "x-requirements": [
+              "COLLOUT-30"
+            ]
+          },
+          "5XX": {
+            "description": "The collector has not stored the output, for a reason of its own.",
+            "x-requirements": [
+              "COLLOUT-24"
+            ]
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "The capture's name, as the relay made it (COLLOUT-16).",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "Trailer",
+            "in": "header",
+            "required": true,
+            "description": "Declares the trailer Warden-Hash, which the relay sends (COLLOUT-18) and a collector reads when it is declared (COLLOUT-15).",
+            "schema": {
+              "type": "string",
+              "const": "Warden-Hash"
+            }
+          }
+        ]
+      }
+    },
+    "/v1/ledger": {
+      "put": {
+        "summary": "Stream the session's ledger",
+        "description": "One request for the whole build, its body the ledger as the relay writes it (COLLOUT-19, COLLOUT-26). The reply comes once the body has ended.",
+        "x-requirements": [
+          "COLLOUT-19",
+          "COLLOUT-22",
+          "COLLOUT-26",
+          "COLLOUT-28"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "*/*": {
+              "schema": {
+                "description": "The bytes of the output, streamed."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. The body is empty.",
+            "x-requirements": [
+              "COLLOUT-19"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body exceeds one of the collector's limits; nothing of it is stored where COLLOUT-30 says so.",
+            "x-requirements": [
+              "COLLOUT-30"
+            ]
+          },
+          "5XX": {
+            "description": "The collector has not stored the output, for a reason of its own.",
+            "x-requirements": [
+              "COLLOUT-24"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/environment": {
+      "put": {
+        "summary": "Store the environment payload",
+        "description": "The payload of the ledger's environment record, at most 1 MiB, sent with no Content-Type (COLLOUT-20, COLLOUT-27, COLLOUT-31).",
+        "x-requirements": [
+          "COLLOUT-20",
+          "COLLOUT-22",
+          "COLLOUT-27",
+          "COLLOUT-31"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "*/*": {
+              "schema": {
+                "description": "The environment payload's bytes, at most 1 MiB."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. The body is empty.",
+            "x-requirements": [
+              "COLLOUT-20"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body exceeds one of the collector's limits; nothing of it is stored where COLLOUT-30 says so.",
+            "x-requirements": [
+              "COLLOUT-30"
+            ]
+          },
+          "5XX": {
+            "description": "The collector has not stored the output, for a reason of its own.",
+            "x-requirements": [
+              "COLLOUT-24"
+            ]
+          }
+        }
+      }
+    },
+    "/v1/output": {
+      "post": {
+        "summary": "Append to the build's console",
+        "description": "A piece of the build's console, kept in the order the requests arrive (COLLOUT-21).",
+        "x-requirements": [
+          "COLLOUT-21",
+          "COLLOUT-22"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "*/*": {
+              "schema": {
+                "description": "The bytes of the output, streamed."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stored. The body is empty.",
+            "x-requirements": [
+              "COLLOUT-21"
+            ]
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "413": {
+            "description": "The body exceeds one of the collector's limits; nothing of it is stored where COLLOUT-30 says so.",
+            "x-requirements": [
+              "COLLOUT-30"
+            ]
+          },
+          "5XX": {
+            "description": "The collector has not stored the output, for a reason of its own.",
+            "x-requirements": [
+              "COLLOUT-24"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

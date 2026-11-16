@@ -1,0 +1,6 @@
+# The requirements of collector-inputs/v1.md that no case of its suite checks, one to a
+# line: the identifier, a space and the reason (see the README's conventions).
+COLLIN-1 It states the unit every other requirement applies to; a collector of this version serves one session, and what each of those requirements asks of that session is checked by the cases that cite it.
+COLLIN-2 It permits a collector to close a completed session's connection; nothing a collector does can fail it.
+COLLIN-10 It asks for a comparison whose time does not depend on the token; a case cannot measure that reliably over a network.
+COLLIN-37 It permits a collector to end a session after times of its own, which a case does not know, and so cannot wait them out to show that a session was or was not ended.

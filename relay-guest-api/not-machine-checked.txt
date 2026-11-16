@@ -1,0 +1,6 @@
+# The requirements of relay-guest-api/v1.md that no case of its suite checks, one to a
+# line: the identifier, a space and the reason (see the README's conventions).
+GUEST-18 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
+GUEST-52 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
+GUEST-53 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).
+GUEST-54 A requirement of the build environment alone; the executor's side of this API has no suite in this version, its cases are the item's that changes the executor's initialize (phase S2).

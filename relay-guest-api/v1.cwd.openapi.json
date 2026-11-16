@@ -1,0 +1,138 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "relay-guest-api: the reserved host cwd",
+    "version": "v1",
+    "summary": "What the relay serves the build environment as http://cwd/: the build context.",
+    "description": "The reserved host cwd of the relay's guest API, as a conforming build environment uses it. The requirements of relay-guest-api/v1.md are normative and this file describes only what they state. What it cannot say is in that document alone: routing by the request's target host (that of an absolute URL, or else the Host) whatever its port, on port 80 and inside TLS on port 443; the link below HTTP (DHCP, ARP, DNS); the ordering, completion as terminal, and the timing of the heartbeat; the differences by mode; and the known divergences. A context path may hold several segments: /{path} is one template whose parameter is marked x-multi-segment and whose rule is GUEST-33's. Only GET is served; another method is proxied (D10).",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://cwd",
+      "description": "Port 80 of the relay's address, or any address the build's connections reach the relay on (GUEST-17)."
+    },
+    {
+      "url": "https://cwd",
+      "description": "Port 443, through interception (GUEST-42); routed as on port 80."
+    }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "listContext",
+        "summary": "List the build context",
+        "x-requirements": [
+          "GUEST-33",
+          "GUEST-34"
+        ],
+        "responses": {
+          "200": {
+            "description": "The collector's listing of the context's root, byte for byte; not recorded.",
+            "x-requirements": [
+              "GUEST-34"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The collector has no context.",
+            "x-requirements": [
+              "GUEST-34"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/{path}": {
+      "get": {
+        "operationId": "getContextPath",
+        "summary": "A file of the build context, or a listing of a directory",
+        "x-requirements": [
+          "GUEST-33",
+          "GUEST-34"
+        ],
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "description": "The context path, one or more segments separated by unescaped slashes, with a trailing slash for a listing (GUEST-33).",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "x-multi-segment": true,
+            "x-requirements": [
+              "GUEST-33"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A file, byte for byte and recorded, or a listing of a directory, byte for byte and not recorded, as the collector gives it.",
+            "x-requirements": [
+              "GUEST-34",
+              "GUEST-49"
+            ],
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "contentMediaType": "application/octet-stream"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden, and a line feed: the path breaks the rule.",
+            "x-requirements": [
+              "GUEST-33"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such context path.",
+            "x-requirements": [
+              "GUEST-34"
+            ],
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
