@@ -118,6 +118,18 @@ These hold in every specification directory.
   by `exec` and a relay by `external`; a relay by `exec` (in the Linux
   sandbox), an `oci` target and a collector that `listens` are errors that
   say they are not built yet.
+- **The harness's roles.** A case drives the component under test through
+  the harness's models of the roles around it, each a package of
+  `conformance/`, written from the documents and sharing no code with the
+  component: `claimant` claims a relay (`relay-claim`), opening the tunnel
+  and serving the collector protocol on it; `collector` is the collector
+  that tests a relay (`collector-outputs`, `collector-inputs`, and the
+  bootstrap config it serves), startable in every form a collector target
+  may declare and recording each request it received in order; and
+  `ledger` verifies a ledger the relay wrote, written from
+  buildwarden/buildwarden's `specs/build-ledger/v1.md` at the commit its
+  package comment names. Their package comments say how each reads what its
+  documents leave open.
 - **Versions.** Each directory's `CHANGELOG.md` starts with the version its
   next release will be, `## vX.Y.Z`, newest first; a pull request that changes
   a directory adds that version. The command reads its version from there. A

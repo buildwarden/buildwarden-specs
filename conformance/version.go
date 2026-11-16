@@ -28,6 +28,16 @@ type Model struct {
 }
 
 // Models is the table of the specification versions the harness's models
-// were written from. It is kept by hand, in the change that changes a model;
-// it is empty until the first model is written.
-var Models = []Model{}
+// were written from. It is kept by hand, in the change that changes a model.
+// The ledger verifier's source is not a specification of this repository:
+// its package comment names the commit of buildwarden/buildwarden it was
+// written from.
+var Models = []Model{
+	// The claimant (package claimant).
+	{Directory: "relay-claim", Version: "v0.1.0"},
+	// The collector that tests a relay (package collector), which also
+	// serves the bootstrap config a relay carries.
+	{Directory: "collector-outputs", Version: "v0.1.0"},
+	{Directory: "collector-inputs", Version: "v0.1.0"},
+	{Directory: "bootstrap-config", Version: "v0.1.0"},
+}

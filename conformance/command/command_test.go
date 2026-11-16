@@ -114,7 +114,7 @@ func TestSubcommands(t *testing.T) {
 	}
 	relayCases := []runner.Case{{Name: "relay-ok", Cites: []string{"CLAIM-1"}, Role: "relay", Run: run}}
 	header := func(target, role string) string {
-		return "relay-claim v0.4.0, conformance " + harness + ", against " + target + " (" + role + ", exec)\nmodels written from: none yet\n"
+		return "relay-claim v0.4.0, conformance " + harness + ", against " + target + " (" + role + ", exec)\nmodels written from: " + modelsLine() + "\n"
 	}
 	line := func(result, name string) string {
 		return result + "\trelay-claim v0.4.0\tconformance " + harness + "\t" + name + "\tCLAIM-1\n"
@@ -133,7 +133,7 @@ func TestSubcommands(t *testing.T) {
 		{name: "help", s: threeReqs, args: []string{"help"}, wantStatus: ExitOK, wantErr: "bw-conformance-relay-claim run -target <file>"},
 		{
 			name: "version", s: threeReqs, args: []string{"version"}, wantStatus: ExitOK,
-			wantOut: "relay-claim v0.4.0\nconformance " + harness + "\nmodels written from: none yet\n",
+			wantOut: "relay-claim v0.4.0\nconformance " + harness + "\n" + modelsTable(),
 		},
 		{name: "version takes no argument", s: threeReqs, args: []string{"version", "x"}, wantStatus: ExitUsage, wantErr: `unexpected argument "x"`},
 		{name: "run without a target", s: threeReqs, args: []string{"run"}, wantStatus: ExitUsage, wantErr: "-target is required"},
@@ -229,4 +229,28 @@ func TestSubcommands(t *testing.T) {
 			}
 		})
 	}
+}
+
+// modelsLine is the table of the models' versions as a report's header
+// gives it, and modelsTable as the version subcommand prints it.
+func modelsLine() string {
+	var out []string
+	for _, m := range conformance.Models {
+		out = append(out, m.Directory+" "+m.Version)
+	}
+	if len(out) == 0 {
+		return "none yet"
+	}
+	return strings.Join(out, ", ")
+}
+
+func modelsTable() string {
+	if len(conformance.Models) == 0 {
+		return "models written from: none yet\n"
+	}
+	out := "models written from:\n"
+	for _, m := range conformance.Models {
+		out += "  " + m.Directory + " " + m.Version + "\n"
+	}
+	return out
 }
