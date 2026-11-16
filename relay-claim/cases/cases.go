@@ -66,4 +66,4 @@ var Cases = slices.Concat([]runner.Case{
 	// The claimant.
 	claimantRequests,
 	claimantRetries,
-}, collectorToken(), captureModes(), upstreamRoots(), environmentLanded())
+}, collectorToken(), captureModes(), upstreamRoots(), environmentLanded(), resolverFailover())

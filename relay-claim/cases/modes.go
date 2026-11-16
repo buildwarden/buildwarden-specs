@@ -101,6 +101,82 @@ var resolverOrder = runner.Case{
 	},
 }
 
+// failoverWorld is resolverFailover's world: the default resolver at
+// resolverAddr, one at the address the relay's resolver configuration names,
+// and a silent one at nobodyAddr, which reads every query and answers none.
+func failoverWorld(t *runner.T) (up *upstream.Upstream, listed, conf, silent *upstream.Resolver) {
+	up = startWorld(t, upstream.World{
+		Resolvers: []netip.Addr{resolverAddr, t.Network(attach.Upstream).Address(), nobodyAddr},
+		Origins:   []upstream.Origin{{Name: originName, Addr: originAddr}},
+	})
+	if err := up.Resolvers[2].SetMode(t.Context(), upstream.Silent); err != nil {
+		t.Fatalf("the silent resolver at %s: %v", nobodyAddr, err)
+	}
+	return up, up.Resolvers[0], up.Resolvers[1], up.Resolvers[2]
+}
+
+// resolverFailover is two cases, each claiming a fresh relay in
+// failoverWorld. With upstream_dns [nobodyAddr, resolverAddr] the build's
+// lookup is answered through resolverAddr, which is asked only after the
+// silent resolver. With upstream_dns [nobodyAddr] alone the build's lookup
+// has no address, and neither resolverAddr nor the resolver of the relay's
+// resolver configuration, which the claim does not list, is asked anything.
+// The relay's wait for the silent resolver is its own; it is bounded by the
+// build's time limit for one lookup (buildenv.DNSTimeout).
+func resolverFailover() []runner.Case {
+	claimWith := func(t *runner.T, up *upstream.Upstream, dns ...string) *buildenv.Env {
+		r := newRun(t, up, attach.Params{})
+		r.tunnel(collector.New(collector.Form{}, nil))
+		accepted(t, "a claim with upstream_dns "+strings.Join(dns, ", "), r.send(r.base().with(claim{"upstream_dns": dns})))
+		return r.build(declaredLink(r.d))
+	}
+	return []runner.Case{{
+		Name:  "with upstream_dns the relay asks the next listed resolver when the first does not answer",
+		Cites: []string{"CLAIM-31"},
+		Role:  "relay",
+		Ends:  true,
+		Run: func(t *runner.T) {
+			up, listed, conf, silent := failoverWorld(t)
+			env := claimWith(t, up, nobodyAddr.String(), resolverAddr.String())
+			if as, err := env.Resolve(t.Context(), originName); err != nil || len(as) != 1 || as[0] != originAddr {
+				t.Errorf("the build's DNS for %s, its first listed resolver silent: %v, %v; want %v", originName, as, err, originAddr)
+			}
+			first, next := silent.Queries(), listed.Queries()
+			switch {
+			case len(first) == 0:
+				t.Errorf("the first resolver of upstream_dns, %s, was asked nothing", nobodyAddr)
+			case len(next) == 0:
+				t.Errorf("the second resolver of upstream_dns, %s, was asked nothing after the first did not answer", resolverAddr)
+			case next[0].At.Before(first[0].At):
+				t.Errorf("the second resolver of upstream_dns was asked for %s before the first was asked anything", next[0].Name)
+			}
+			for _, q := range conf.Queries() {
+				t.Errorf("the resolver of the relay's resolver configuration, %s, which the claim's upstream_dns does not list, was asked for %s", conf.Address(), q.Name)
+			}
+		},
+	}, {
+		Name:  "with upstream_dns whose one resolver does not answer the relay asks no other",
+		Cites: []string{"CLAIM-31"},
+		Role:  "relay",
+		Ends:  true,
+		Run: func(t *runner.T) {
+			up, listed, conf, silent := failoverWorld(t)
+			env := claimWith(t, up, nobodyAddr.String())
+			if as, err := env.Resolve(t.Context(), originName); err == nil {
+				t.Errorf("the build's DNS for %s, its one listed resolver silent, answered %v", originName, as)
+			}
+			if len(silent.Queries()) == 0 {
+				t.Errorf("the one resolver of upstream_dns, %s, was asked nothing", nobodyAddr)
+			}
+			for _, r := range []*upstream.Resolver{listed, conf} {
+				for _, q := range r.Queries() {
+					t.Errorf("%s, which the claim's upstream_dns does not list, was asked for %s", r.Address(), q.Name)
+				}
+			}
+		},
+	}}
+}
+
 // resolverDefault claims a fresh relay without upstream_dns: its resolver is
 // the one its resolver configuration names after 127.0.0.1, which the
 // harness gives as its own upstream address.
