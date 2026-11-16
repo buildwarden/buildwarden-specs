@@ -6,7 +6,9 @@ import "github.com/buildwarden/buildwarden-specs/conformance/runner"
 
 // Cases are the suite's cases. Those below HTTP come first: the relay's
 // address and ports, the frame link, the address lease, DNS, and the
-// upstream dials the relay refuses.
+// upstream dials the relay refuses. Then those over HTTP: the reserved
+// host artifacts, the reserved host cwd, the control plane, the proxy and
+// interception, the CA, and what the relay records.
 var Cases = []runner.Case{
 	ownAddress,
 	interfacePorts,
@@ -29,4 +31,44 @@ var Cases = []runner.Case{
 	refusedLink,
 	refusedHost,
 	refusedAny,
+	routedByTarget,
+	heartbeatServed,
+	heartbeatForwarded,
+	exitCode,
+	exitLeast,
+	exitMost,
+	exitAbsent,
+	exitEmpty,
+	caServed,
+	crlServed,
+	scriptServed,
+	scriptMissing,
+	bootstrapServed,
+	bootstrapMissing,
+	artifactStored,
+	artifactNameRefused,
+	artifactNotStored,
+	fixedNotUploads,
+	notFound,
+	cwdServed,
+	cwdRefused,
+	health,
+	outputForwarded,
+	outputRefused,
+	outputLimit,
+	completeCode,
+	completeAbsent,
+	controlRefused,
+	proxiedHTTP,
+	intercepted,
+	proxiedTLS,
+	untrustedUpstream,
+	unchanged,
+	resolvedUpstream,
+	unreachableUpstream,
+	keptAlive,
+	caCertificate,
+	roundTrip,
+	nothingAfterCompletion,
+	refusalsPlain,
 }
