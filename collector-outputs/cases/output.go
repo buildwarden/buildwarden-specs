@@ -16,7 +16,10 @@ var resolverConf = netip.MustParseAddr("192.0.2.53")
 // oneOutput has the harness's relay, with no build side, claimed by the
 // collector under test, send it one piece of console output, which the
 // collector answers 200 with an empty body. The collector is started for
-// this case's relay alone, and so is a fresh instance.
+// this case's relay alone, and so is a fresh instance. It is given an output
+// location of its own and the capture mode "none", which a collector that
+// claims may need on its command line; it is given no build script and no
+// context.
 //
 // A collector that claims may leave upstream_dns out, so the relay is given a
 // resolver configuration (CLAIM-32 in relay-claim) naming resolverConf, at
@@ -36,7 +39,10 @@ var oneOutput = runner.Case{
 			t.Fatalf("the harness's relay: %v", err)
 		}
 		t.Cleanup(func() { _ = r.Stop() })
-		in := t.Instance(attach.Params{Claim: r.Claim().Address, Token: r.Claim().Token})
+		in := t.Instance(attach.Params{
+			Claim: r.Claim().Address, Token: r.Claim().Token,
+			Out: t.TempDir(), Capture: "none",
+		})
 		s, err := r.Session(ctx)
 		if err != nil {
 			t.Fatalf("the collector's claim: %v; its log:\n%s", err, in.Log())
