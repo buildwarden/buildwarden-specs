@@ -63,10 +63,10 @@ type Query struct {
 }
 
 // Resolver is an upstream DNS resolver on port 53 of one address, over UDP
-// and TCP. Its zone maps names to IPv4 addresses: a query of type A for a
-// name in the zone is answered with one A record for each address, one of
-// another type with no records, and a query for a name not in the zone with
-// NXDOMAIN. A name in the zone matches a query whatever its case.
+// and TCP. Its zone maps names to addresses: a query of type A for a name
+// in the zone is answered with one A record for each IPv4 address, one of
+// type AAAA with one AAAA record for each IPv6 address, one of another type
+// with no records, and a query for a name not in the zone with NXDOMAIN. A name in the zone matches a query whatever its case.
 type Resolver struct {
 	net  attach.Network
 	addr netip.Addr
@@ -209,12 +209,26 @@ func (r *Resolver) handler(transport string) dns.HandlerFunc {
 			m.Rcode = dns.RcodeFormatError
 		case !found:
 			m.Rcode = dns.RcodeNameError
-		case q.Question[0].Qtype == dns.TypeA && q.Question[0].Qclass == dns.ClassINET:
+		case q.Question[0].Qclass != dns.ClassINET:
+		case q.Question[0].Qtype == dns.TypeA:
+			// A name's IPv4 addresses in A records, and its IPv6 ones in
+			// AAAA records only.
 			for _, a := range addrs {
-				m.Answer = append(m.Answer, &dns.A{
-					Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: TTL},
-					A:   a.AsSlice(),
-				})
+				if a.Unmap().Is4() {
+					m.Answer = append(m.Answer, &dns.A{
+						Hdr: dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: TTL},
+						A:   a.Unmap().AsSlice(),
+					})
+				}
+			}
+		case q.Question[0].Qtype == dns.TypeAAAA:
+			for _, a := range addrs {
+				if !a.Unmap().Is4() {
+					m.Answer = append(m.Answer, &dns.AAAA{
+						Hdr:  dns.RR_Header{Name: q.Question[0].Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: TTL},
+						AAAA: a.AsSlice(),
+					})
+				}
 			}
 		}
 		_ = w.WriteMsg(m)

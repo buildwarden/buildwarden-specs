@@ -178,6 +178,29 @@ func TestResolverSet(t *testing.T) {
 	if m, err = query(ctx, n, "udp", resolverA, "new.example", dns.TypeA); err != nil || m.Rcode != dns.RcodeNameError {
 		t.Errorf("%v, %v; want NXDOMAIN", m, err)
 	}
+	// A name with an address of each family: its IPv4 one in A, its IPv6
+	// one in AAAA.
+	six := netip.MustParseAddr("2001:db8::1")
+	r.Set("both.example", resolverA, six)
+	for _, tt := range []struct {
+		qtype uint16
+		want  netip.Addr
+	}{{dns.TypeA, resolverA}, {dns.TypeAAAA, six}} {
+		m, err := query(ctx, n, "udp", resolverA, "both.example", tt.qtype)
+		if err != nil || len(m.Answer) != 1 {
+			t.Fatalf("%s: %v, %v; want one answer", dns.TypeToString[tt.qtype], m, err)
+		}
+		var got net.IP
+		switch a := m.Answer[0].(type) {
+		case *dns.A:
+			got = a.A
+		case *dns.AAAA:
+			got = a.AAAA
+		}
+		if a, _ := netip.AddrFromSlice(got); a.Unmap() != tt.want || m.Answer[0].Header().Rrtype != tt.qtype {
+			t.Errorf("%s: answer %v, want %s", dns.TypeToString[tt.qtype], m.Answer[0], tt.want)
+		}
+	}
 }
 
 // dialer connects every request to the origins' address, at the port of
