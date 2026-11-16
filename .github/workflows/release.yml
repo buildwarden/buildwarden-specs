@@ -1,12 +1,14 @@
 name: release
+run-name: release ${{ inputs.tag || github.ref_name }}
 
 # A release is a tag <directory>/vX.Y.Z on main, one directory to a tag. For a
 # specification's tag this builds its command, bw-conformance-<directory>, with
-# go install <command>@<tag> for three operating systems and two
-# architectures, which builds exactly what the tag serves with the versions its
-# go.mod lists, and attaches the binaries to the tag's release with
-# SHA256SUMS. A tag conformance/vX.Y.Z releases the harness, which has no
-# binary: its run checks the tag and attaches nothing.
+# go install <command>@vX.Y.Z, the tag without its directory (Go names a
+# subdirectory module's version by the bare version), for three operating
+# systems and two architectures, which builds exactly what the tag serves
+# with the versions its go.mod lists, and attaches the binaries to the tag's
+# release with SHA256SUMS. A tag conformance/vX.Y.Z releases the harness,
+# which has no binary: its run checks the tag and attaches nothing.
 #
 # A push of more than three tags starts no run, so tags are pushed one to a
 # push, the harness's first: go install resolves the harness version a
@@ -69,7 +71,7 @@ jobs:
             for goarch in amd64 arm64; do
               gopath="$RUNNER_TEMP/gopath-$goos-$goarch"
               GOWORK=off GOPATH="$gopath" GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 \
-                go install "$cmd@$TAG"
+                go install "$cmd@$VERSION"
               ext=""
               [ "$goos" = windows ] && ext=".exe"
               # go install puts a binary for the runner's own platform in
