@@ -1,2 +1,5 @@
 # The requirements of relay-claim/v1.md that no case of its suite checks, one to a
 # line: the identifier, a space and the reason (see the README's conventions).
+CLAIM-1 That a relay opens no connection to the claimant is an absence over the relay's whole life; the suite sees only the connections it is offered, never every one the relay might open.
+CLAIM-6 A constant-time comparison cannot be shown from outside by a suite whose verdicts may not depend on timing (TEST-04).
+CLAIM-10 How the token reaches the relay is its launcher's, before the protocol starts; a suite sees the token's effect (CLAIM-5), not its channel.
