@@ -219,22 +219,37 @@ var vmNoLink = runner.Case{
 	},
 }
 
-// hostLink claims a fresh host-mode relay with the declared build_link: the
-// lease on the frame link is the build_link's.
+// otherLink is the build_link hostLink sends: one no relay has as its own
+// segment (a Go relay's -subnet default is 10.100.0.0/30), outside the
+// ranges the sandbox addresses itself from, and with the relay and guest
+// addresses in an order no default has.
+var otherLink = map[string]string{"prefix": "10.101.0.0/29", "relay": "10.101.0.5", "guest": "10.101.0.3"}
+
+// onFrames applies to a relay whose build link is a frame link, both of
+// whose ends the harness owns, so that the case can choose its addresses.
+func onFrames(d target.Declared) string {
+	if d.Link != buildenv.Frames {
+		return "the relay's build link is not a frame link, whose addresses the harness could choose"
+	}
+	return ""
+}
+
+// hostLink claims a fresh host-mode relay with a build_link that differs
+// from the relay's own segment: the lease on the frame link is the
+// build_link's, from its relay address.
 var hostLink = runner.Case{
 	Name:    "a host-mode relay builds its link on the build_link",
 	Cites:   []string{"CLAIM-39"},
 	Role:    "relay",
 	Ends:    true,
-	Applies: both(inMode(relay.ModeHost), withLink),
+	Applies: both(inMode(relay.ModeHost), onFrames),
 	Run: func(t *runner.T) {
 		r := startRelay(t, attach.Params{})
 		r.tunnel(collector.New(collector.Form{}, nil))
-		accepted(t, "the claim", r.send(r.base()))
-		link := declaredLink(r.d)
-		env := r.build(link)
+		accepted(t, "a claim with the build_link "+otherLink["prefix"], r.send(r.base().with(claim{"build_link": otherLink})))
+		env := r.build(otherLink)
 		l, _ := env.Lease()
-		checkLease(t, l, link)
+		checkLease(t, l, otherLink)
 	},
 }
 

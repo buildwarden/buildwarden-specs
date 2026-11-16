@@ -16,8 +16,10 @@
 // cases to a relay that cannot be started with a token (or without one);
 // the cases of one mode to the others (vm: CLAIM-37, CLAIM-38; host:
 // CLAIM-39; container: CLAIM-40; vm and host: CLAIM-41 and the refusal of
-// CLAIM-32); the resolver configuration's cases to a relay the harness gives
-// none; and the claimant's cases to a collector that does not claim.
+// CLAIM-32); the host-mode case with a build_link to a relay whose build
+// link is not a frame link; the resolver configuration's cases to a relay
+// the harness gives none; and the claimant's cases to a collector that does
+// not claim.
 package cases
 
 import (
