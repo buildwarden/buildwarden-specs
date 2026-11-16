@@ -102,6 +102,7 @@ type GuestConfig struct {
 type Guest struct {
 	cfg GuestConfig
 
+	stopOnce  sync.Once
 	mu        sync.Mutex
 	link      netip.Prefix // the relay's address and the build link's length
 	guest     netip.Addr   // the lease's address; invalid where none is served
@@ -234,12 +235,12 @@ func (g *Guest) Start(ctx context.Context, s *Session) error {
 		err = g.startIP(ctx)
 	}
 	if err != nil {
-		g.stop()
+		g.Stop()
 		return err
 	}
 	go func() {
 		<-ctx.Done()
-		g.stop()
+		g.Stop()
 	}()
 	return nil
 }
@@ -310,6 +311,10 @@ func (g *Guest) startIP(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Stop closes everything the build side holds, once; a second call, or one
+// made while the first runs, returns when the first has finished.
+func (g *Guest) Stop() { g.stopOnce.Do(g.stop) }
 
 // stop closes everything the build side holds.
 func (g *Guest) stop() {

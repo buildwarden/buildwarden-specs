@@ -508,5 +508,35 @@ func TestARP(t *testing.T) {
 	if !bytes.Equal(fr[22:28], relay.RelayMAC) || binary.BigEndian.Uint16(fr[20:22]) != 2 {
 		t.Errorf("the ARP reply: % x", fr)
 	}
+}
 
+// TestStopClosesBuildSide: an instance's Stop returns only once its build
+// side listens no more, so that the next instance on the same addresses
+// does not meet the last one's listeners.
+func TestStopClosesBuildSide(t *testing.T) {
+	for _, mode := range []string{relay.ModeVM, relay.ModeContainer} {
+		t.Run(mode, func(t *testing.T) {
+			c := claim(t, mode, nil)
+			addr := ContainerRelay.Addr()
+			if mode == relay.ModeVM {
+				addr = netip.MustParseAddr(BuildLink.Relay)
+			}
+			n := network(t, c.a, attach.Build)
+			ctx := testCtx(t)
+			conn, err := n.Dial(ctx, "tcp", netip.AddrPortFrom(addr, relay.PortControl).String())
+			if err != nil {
+				t.Fatalf("before Stop: %v", err)
+			}
+			_ = conn.Close()
+			if err := c.in.Stop(); err != nil {
+				t.Fatal(err)
+			}
+			for _, port := range []uint16{relay.PortControl, relay.PortDNS} {
+				if conn, err := n.Dial(ctx, "tcp", netip.AddrPortFrom(addr, port).String()); err == nil {
+					_ = conn.Close()
+					t.Errorf("after Stop the build side accepted a connection to %s:%d", addr, port)
+				}
+			}
+		})
+	}
 }

@@ -109,8 +109,8 @@ const (
 
 // Build is the relay's build side, which the claim configures and starts.
 // The relay calls Configure once a claim's fields are valid and its
-// resolvers known, and Start once the session has its ledger, its
-// environment and its CA, before ready.
+// resolvers known, Start once the session has its ledger, its environment
+// and its CA, before ready, and Stop when it is stopped.
 type Build interface {
 	// Configure applies the claim's build link. An error made by Refused
 	// answers the claim 400 and leaves the relay claimable; any other
@@ -119,6 +119,10 @@ type Build interface {
 	// Start starts the build-facing listeners for s; an error fails the
 	// start.
 	Start(ctx context.Context, s *Session) error
+	// Stop closes what the build side holds, and returns once it has, so
+	// that the next instance on the same network finds its addresses free.
+	// It may be called more than once, and before Start.
+	Stop()
 }
 
 // Config is what a relay is started with.
@@ -239,7 +243,8 @@ func (r *Relay) Session(ctx context.Context) (*Session, error) {
 	}
 }
 
-// Stop ends the relay and what its session holds.
+// Stop ends the relay and what its session holds, and returns once its
+// build side has closed every listener and connection.
 func (r *Relay) Stop() error {
 	r.end("stopped")
 	r.mu.Lock()
@@ -249,6 +254,9 @@ func (r *Relay) Stop() error {
 		s.close()
 	}
 	<-r.served
+	if r.cfg.Build != nil {
+		r.cfg.Build.Stop()
+	}
 	return nil
 }
 
