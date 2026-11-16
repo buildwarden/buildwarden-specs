@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/buildwarden/buildwarden-specs/conformance"
+	"github.com/buildwarden/buildwarden-specs/conformance/internal/coverage"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
 	"github.com/buildwarden/buildwarden-specs/conformance/target"
@@ -28,7 +29,7 @@ const (
 func Main(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writer) int {
 	name := "bw-conformance-" + s.Directory
 	usage := func() {
-		fmt.Fprintf(stderr, "usage:\n  %s run -target <file>\n  %s requirements\n  %s version\n", name, name, name)
+		fmt.Fprintf(stderr, "usage:\n  %s run -target <file>\n  %s requirements [-check]\n  %s version\n", name, name, name)
 	}
 	if len(args) == 0 {
 		usage()
@@ -105,12 +106,21 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 }
 
 func requirements(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writer) error {
-	if err := flags(flag.NewFlagSet("requirements", flag.ContinueOnError), args, stderr); err != nil {
+	fset := flag.NewFlagSet("requirements", flag.ContinueOnError)
+	check := fset.Bool("check", false, "list nothing; fail unless every requirement is cited by a case or listed as not machine-checked")
+	if err := flags(fset, args, stderr); err != nil {
 		return err
 	}
 	l, err := s.Load()
 	if err != nil {
 		return err
+	}
+	if *check {
+		if err := coverage.Check(s, l, cases); err != nil {
+			return fmt.Errorf("the coverage check fails:\n%w", err)
+		}
+		fmt.Fprintf(stdout, "%s %s: %d requirements, %d cases, %d listed as not machine-checked: covered\n", s.Directory, l.Version, len(l.Requirements), len(cases), len(l.Unchecked))
+		return nil
 	}
 	citedBy := map[string][]string{}
 	for _, c := range cases {

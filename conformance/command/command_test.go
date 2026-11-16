@@ -92,6 +92,19 @@ func TestSubcommands(t *testing.T) {
 			wantOut: "relay-claim v0.4.0 (v1.md)\nno requirements yet\n",
 		},
 		{
+			name: "requirements -check fails on a requirement with no case", s: threeReqs, cases: cited, args: []string{"requirements", "-check"}, wantStatus: ExitFail,
+			wantErr: "relay-claim/v1.md: CLAIM-3 is neither cited by a case of the suite nor listed in not-machine-checked.txt",
+		},
+		{
+			name: "requirements -check passes when covered", s: testSpec("**CLAIM-1.** a\n\n**CLAIM-2.** b\n", "CLAIM-2 a person reads it\n"),
+			cases: cited, args: []string{"requirements", "-check"}, wantStatus: ExitOK,
+			wantOut: "relay-claim v0.4.0: 2 requirements, 2 cases, 1 listed as not machine-checked: covered\n",
+		},
+		{
+			name: "requirements -check passes on a skeleton", s: testSpec("# t\n", ""), args: []string{"requirements", "-check"}, wantStatus: ExitOK,
+			wantOut: "relay-claim v0.4.0: 0 requirements, 0 cases, 0 listed as not machine-checked: covered\n",
+		},
+		{
 			name: "a malformed document fails", s: testSpec("**CLAIM-01.** a\n", ""), args: []string{"requirements"}, wantStatus: ExitFail,
 			wantErr: `relay-claim/v1.md: line 1: "CLAIM-01" is not a requirement identifier`,
 		},
