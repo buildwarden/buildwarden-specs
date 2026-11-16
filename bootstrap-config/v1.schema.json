@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/buildwarden/buildwarden-specs/bootstrap-config/v1.schema.json",
+  "title": "The bootstrap config, version 1",
+  "description": "The policy document a collector serves at GET /v1/bootstrap and the relay carries to the executor at http://artifacts/bootstrap. It carries policy only: no path, file content, command or environment variable. bootstrap-config/v1.md is normative; this schema is the form a producer sends (BOOTCFG-1).",
+  "type": "object",
+  "required": ["version"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The config format's version. Always the integer 1 in this version of the document.",
+      "type": "integer",
+      "const": 1
+    },
+    "trust": {
+      "description": "The guest's system trust policy. Absent, it is the policy whose mode is append.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "description": "append: the relay's CA is added to the guest's system roots. exclusive: the relay's CA is the guest's only system root. Absent, the mode is append.",
+          "type": "string",
+          "enum": ["append", "exclusive"]
+        }
+      }
+    }
+  }
+}
