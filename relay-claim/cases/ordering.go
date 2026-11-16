@@ -83,7 +83,7 @@ var afterTheClaim = runner.Case{
 		coll := collector.New(collector.Form{}, nil)
 		r.tunnel(coll)
 		accepted(t, "the claim", r.send(r.base()))
-		r.notAnswering("after the 200")
+		r.notAnswering("after the 200", false)
 		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 		if _, err := r.cl.OpenTunnel(ctx, coll); err == nil {

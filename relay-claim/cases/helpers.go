@@ -302,9 +302,12 @@ func exit(t *runner.T, env *buildenv.Env, coll *collector.Collector) {
 
 // notAnswering polls the claim endpoint with an authorized claim, every
 // 100 ms for at most within, until a connection is refused or closed with no
-// reply, and fails the case if the relay answers one 200 or with anything
-// but 409 "already claimed", or still answers at the end.
-func (r *relayRun) notAnswering(what string) {
+// reply, and fails the case if the relay answers one 200, or still answers
+// at the end. After a 200 (spent false) a claim it still answers must be
+// refused 409 "already claimed" (CLAIM-46). A relay spent by a 500 (spent
+// true) accepts no further claim and ends (CLAIM-50), which names no answer
+// for a claim it reads while it ends: any status but 200 is taken.
+func (r *relayRun) notAnswering(what string, spent bool) {
 	t := r.t
 	deadline := time.Now().Add(within)
 	h := http.Header{"Content-Type": {"application/json"}}
@@ -322,7 +325,7 @@ func (r *relayRun) notAnswering(what string) {
 		if rep.Status == http.StatusOK {
 			t.Fatalf("%s: a later claim was answered 200", what)
 		}
-		if !refusal(t, what+": a later claim", rep, http.StatusConflict, "already claimed", true) {
+		if !spent && !refusal(t, what+": a later claim", rep, http.StatusConflict, "already claimed", true) {
 			return
 		}
 		if time.Now().After(deadline) {

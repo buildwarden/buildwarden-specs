@@ -74,7 +74,7 @@ var collectorUnreachable = runner.Case{
 		r := startRelay(t, attach.Params{})
 		rep := r.send(r.base().with(claim{"collector_url": "http://" + nobodyAddr.String()}))
 		if refusal(t, "the claim", rep, http.StatusInternalServerError, "relay start failed: ", false) {
-			r.notAnswering("after the 500")
+			r.notAnswering("after the 500", true)
 		}
 	},
 }
@@ -272,8 +272,9 @@ func environmentLanded() []runner.Case {
 }
 
 // environmentUnusable claims a fresh relay with each environment the relay
-// cannot use, and with one the collector refuses: each fails the start with
-// 500, and the relay is spent (Known divergences, D6).
+// cannot use, landed with a collector that answers it 200, and with a valid
+// one the collector refuses: each fails the start with 500, and the relay
+// is spent (Known divergences, D6).
 var environmentUnusable = runner.Case{
 	Name:  "an environment the relay cannot use fails its start with 500",
 	Cites: []string{"CLAIM-28", "CLAIM-50", "CLAIM-53"},
@@ -300,19 +301,25 @@ var environmentUnusable = runner.Case{
 			{"a valid environment the collector refuses", map[string]any{"payload": payload(`{"type":"conformance-test/v1"}`), "metadata": emptyMap}, true},
 		} {
 			r := newRun(t, up, attach.Params{})
-			var fault collector.Fault
+			// The collector answers PUT /v1/environment 500 for the one
+			// variant it refuses, and 200 for every other, whatever it
+			// holds: the harness's collector would refuse some of those
+			// itself (a payload over its own limit), and the 500 must
+			// come from the relay's own check of the environment.
+			answer := http.StatusOK
 			if v.refuse {
-				fault = func(q *http.Request) int {
-					if q.URL.Path == "/v1/environment" {
-						return http.StatusInternalServerError
-					}
-					return 0
+				answer = http.StatusInternalServerError
+			}
+			fault := func(q *http.Request) int {
+				if q.URL.Path == "/v1/environment" {
+					return answer
 				}
+				return 0
 			}
 			r.tunnel(collector.New(collector.Form{}, fault))
 			rep := r.send(r.base().with(claim{"environment": v.env}))
 			if refusal(t, "a claim with "+v.name, rep, http.StatusInternalServerError, "relay start failed: ", false) {
-				r.notAnswering("after the 500 to a claim with " + v.name)
+				r.notAnswering("after the 500 to a claim with "+v.name, true)
 			}
 		}
 	},
