@@ -263,11 +263,39 @@ func (c *Collector) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// unanswered, as a closed connection would leave it.
 		panic(http.ErrAbortHandler)
 	}
-	status, body := c.serve(w, r)
+	status, body := c.serve(&drainingWriter{ResponseWriter: w, body: r.Body}, r)
 	if c.end(rec, r, status, body) {
 		// The first completion, its reply written: the session ends.
 		close(c.done)
 	}
+}
+
+// drainingWriter reads what is left of the request's body, up to Limit,
+// before it writes the reply's header. A refusal is then never written
+// while the body, and a capture's trailer, are still on their way: the
+// HTTP/2 server of a tunnel takes a trailer that arrives on a stream it has
+// answered for an error of the whole connection, and ends the tunnel (the
+// disk collector's N32 in collector-outputs). Where the handler has read
+// the body, nothing is left to read.
+type drainingWriter struct {
+	http.ResponseWriter
+	body    io.Reader
+	drained bool
+}
+
+func (d *drainingWriter) WriteHeader(status int) {
+	if !d.drained {
+		d.drained = true
+		_, _ = io.Copy(io.Discard, io.LimitReader(d.body, Limit))
+	}
+	d.ResponseWriter.WriteHeader(status)
+}
+
+func (d *drainingWriter) Write(b []byte) (int, error) {
+	if !d.drained {
+		d.WriteHeader(http.StatusOK)
+	}
+	return d.ResponseWriter.Write(b)
 }
 
 // begin records r's arrival, or returns nil when the session has ended.

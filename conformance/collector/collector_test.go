@@ -676,3 +676,45 @@ func TestServeEndsAtCompletion(t *testing.T) {
 		t.Fatal("Serve did not return at the completion")
 	}
 }
+
+// TestRefusalAfterBody: a refused request is answered only once its body,
+// and a capture's trailer, have arrived, so that the refusal never leaves a
+// trailer to arrive on a stream the HTTP/2 server has answered; the same
+// connection then serves on.
+func TestRefusalAfterBody(t *testing.T) {
+	t.Parallel()
+	coll := New(Form{Token: "t"}, nil)
+	c := newClient(t, coll, "Bearer t", true)
+	for i, path := range []string{"/v1/captures/..", "/v1/captures/" + strings.Repeat("n", 256), "/v1/artifacts/%2E%2E"} {
+		for _, auth := range []string{"Bearer t", "Bearer wrong"} {
+			pr, pw := io.Pipe()
+			ended := make(chan struct{})
+			go func() {
+				_, _ = pw.Write([]byte("part"))
+				time.Sleep(50 * time.Millisecond)
+				close(ended)
+				_ = pw.Close()
+			}()
+			r, err := http.NewRequest("PUT", c.base+path, pr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", auth)
+			r.Trailer = http.Header{"Warden-Hash": {strings.Repeat("0", 64)}}
+			resp, err := c.c.Do(r)
+			if err != nil {
+				t.Fatalf("%d %s: %v", i, path, err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("PUT %s with %q: %d, want a refusal", path, auth, resp.StatusCode)
+			}
+			select {
+			case <-ended:
+			default:
+				t.Errorf("PUT %s with %q: answered %d before its body ended", path, auth, resp.StatusCode)
+			}
+		}
+	}
+	c.expect("POST", "/v1/output", strings.NewReader("on\n"), http.StatusOK, "*")
+}
