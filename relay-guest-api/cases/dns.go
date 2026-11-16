@@ -276,8 +276,11 @@ var forwardSilent = runner.Case{
 			t.Errorf("A %s was answered %s with %v, want the second resolver's NOERROR with %s", originName, dns.RcodeToString[ans.Rcode], ans.Answer, originAddr)
 		}
 		asked := askedFor(r.up, originName)
-		if len(asked[0]) != 1 || len(asked[1]) != 1 || len(asked[2]) != 0 {
-			t.Fatalf("the resolvers received %d, %d and %d queries for %s, want 1, 1 and 0", len(asked[0]), len(asked[1]), len(asked[2]), originName)
+		// GUEST-15 does not forbid asking a resolver again within its 5 s,
+		// so the first two may each have been asked more than once; the gap
+		// is from the first query to each.
+		if len(asked[0]) == 0 || len(asked[1]) == 0 || len(asked[2]) != 0 {
+			t.Fatalf("the resolvers received %d, %d and %d queries for %s, want at least 1, at least 1 and 0", len(asked[0]), len(asked[1]), len(asked[2]), originName)
 		}
 		if gap := asked[1][0].At.Sub(asked[0][0].At); gap < failover {
 			t.Errorf("the relay asked the second resolver %s after the first, which had not answered; it gives a resolver 5 s", gap)

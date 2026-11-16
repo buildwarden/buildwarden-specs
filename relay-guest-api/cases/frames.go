@@ -137,8 +137,12 @@ var macLearned = runner.Case{
 	},
 }
 
-// announced: from the claim's 200 on, the relay broadcasts gratuitous ARP
-// for its address, more than once.
+// announced: from the claim's 200 on, before the build environment has
+// sent a frame, the relay broadcasts a gratuitous ARP for its address, from
+// the MAC address its ARP reply gives. GUEST-5 states no rate and no
+// repetition (the Go relay's every 500 ms is its own), so one is enough.
+// GUEST-5 is a SHOULD; the runner has one verdict, so a relay that sends
+// none fails this case as it would a MUST's.
 var announced = runner.Case{
 	Name:    "on a frame link, the relay announces its address with gratuitous ARP, broadcast, from the start of the link",
 	Cites:   []string{"GUEST-5"},
@@ -148,28 +152,19 @@ var announced = runner.Case{
 	Run: func(t *runner.T) {
 		r := startRelay(t)
 		r.claim()
-		claimed := time.Now()
 		p := newParty(t, r.frames(), guestMAC, r.guestAddr())
 		relay := r.relayAddr()
-		// Two announcements within this bound: the Go relay's is every
-		// 500 ms (relay-guest-api, GUEST-5).
-		const bound = 3 * time.Second
-		f1, i, ok := p.awaitAt(0, bound, func(b []byte) bool { return gratuitous(b, relay) })
+		// The party sends nothing until the announcement has come: it is
+		// a build environment that waits for the link to be up.
+		f, ok := p.await(0, within, func(b []byte) bool { return gratuitous(b, relay) })
 		if !ok {
-			t.Fatalf("no gratuitous ARP for %s within %s of the claim's 200", relay, bound)
+			t.Fatalf("no gratuitous ARP for %s, broadcast, within %s of the claim's 200, the build environment having sent nothing", relay, within)
 		}
-		f2, ok := p.await(i+1, bound-time.Since(claimed), func(b []byte) bool { return gratuitous(b, relay) })
-		if !ok {
-			t.Fatalf("one gratuitous ARP for %s and no second within %s of the claim's 200", relay, bound)
+		m, _ := parseARP(f.Bytes)
+		if src := net.HardwareAddr(f.Bytes[6:12]); !bytes.Equal(src, m.SenderMAC) {
+			t.Errorf("the gratuitous ARP gives the MAC address %s, and its frame came from %s", m.SenderMAC, src)
 		}
-		for _, f := range []frame{f1, f2} {
-			m, _ := parseARP(f.Bytes)
-			if src := net.HardwareAddr(f.Bytes[6:12]); !bytes.Equal(src, m.SenderMAC) {
-				t.Errorf("a gratuitous ARP gives the MAC address %s, and its frame came from %s", m.SenderMAC, src)
-			}
-		}
-		mac := p.relayMAC(relay)
-		if m, _ := parseARP(f1.Bytes); !bytes.Equal(m.SenderMAC, mac) {
+		if mac := p.relayMAC(relay); !bytes.Equal(m.SenderMAC, mac) {
 			t.Errorf("the gratuitous ARP gives %s as the relay's MAC address, and its ARP reply %s", m.SenderMAC, mac)
 		}
 	},
