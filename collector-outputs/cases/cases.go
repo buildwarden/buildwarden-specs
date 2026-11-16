@@ -4,7 +4,30 @@ package cases
 
 import "github.com/buildwarden/buildwarden-specs/conformance/runner"
 
-// Cases are the suite's cases.
+// Cases are the suite's cases: first those of the collector role, then
+// those of the relay role.
 var Cases = []runner.Case{
 	oneOutput,
+	eachOutput,
+	ledgerAnswered,
+	artifactNamesRefused,
+	artifactsStored,
+	capturesNamed,
+	capturesStored,
+	capturesWithoutHash,
+	environmentStored,
+	environmentOverLimit,
+	methodsRefused,
+	unauthorizedOutputs,
+	noTokenNeeded,
+	tokenless,
+	consoleStored,
+
+	outputMethods,
+	noTokenSent,
+	ledgerFirst,
+	capturesHashed,
+	environmentFirst,
+	environmentTooLarge,
+	notStored,
 }
