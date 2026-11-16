@@ -169,7 +169,11 @@ func captureModes() []runner.Case {
 // CA only, with upstream_system_ca false. Each claims a fresh relay and has
 // the build fetch the origin over TLS: with the origins' CA the fetch
 // succeeds; with the other the relay must not trust the origin, which
-// therefore receives no request over TLS.
+// therefore receives no request over TLS. Where the origins' CA is sent, it
+// is the second certificate of a bundle whose first is another CA's, so that
+// every certificate of an entry must be trusted (CLAIM-26). Whether the
+// relay's system roots are in or out (CLAIM-27) is not checked: they are its
+// host's, and the origins' CA is never one of them.
 func upstreamRoots() []runner.Case {
 	var out []runner.Case
 	for _, v := range []struct {
@@ -187,20 +191,20 @@ func upstreamRoots() []runner.Case {
 		}
 		out = append(out, runner.Case{
 			Name:  "upstream TLS with " + v.name + " in the claim " + verdict,
-			Cites: []string{"CLAIM-26", "CLAIM-27"},
+			Cites: []string{"CLAIM-26"},
 			Role:  "relay",
 			Ends:  true,
 			Run: func(t *runner.T) {
 				r := startRelay(t, attach.Params{})
 				coll := collector.New(collector.Form{}, nil)
 				r.tunnel(coll)
-				roots := string(r.up.CA.PEM())
-				if !v.trusted {
-					other, err := upstream.NewCA()
-					if err != nil {
-						t.Fatalf("a CA: %v", err)
-					}
-					roots = string(other.PEM())
+				other, err := upstream.NewCA()
+				if err != nil {
+					t.Fatalf("a CA: %v", err)
+				}
+				roots := string(other.PEM())
+				if v.trusted {
+					roots += string(r.up.CA.PEM())
 				}
 				ca := accepted(t, "a claim with "+v.name, r.send(r.base().with(claim{"upstream_ca_certs": []string{roots}, "upstream_system_ca": v.system})))
 				env := r.build(declaredLink(r.d))
