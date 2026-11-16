@@ -1,10 +1,10 @@
-// Package relay is the harness's relay: the relay's side of the claim and of
-// the collector protocol, written from the specifications relay-claim,
-// collector-outputs and collector-inputs. It is what tests a collector, a
-// collector that claims reaching it at a claim address on loopback, and the
-// first part of the relay that is itself a role under test; the build side
-// (the lease, DNS, the reserved hosts, interception and the modes) is added
-// to it through Build.
+// Package relay is the harness's relay, written from the specifications
+// relay-claim, collector-outputs, collector-inputs, relay-guest-api and
+// bootstrap-config: the relay's side of the claim and of the collector
+// protocol, and its build side. It is what tests a collector, a collector
+// that claims reaching it at a claim address, and it is itself a role under
+// test, which the relay suites run against under go test through the
+// harness's in-process attachment (package inprocess), once in each mode.
 //
 // A Relay serves the claim endpoint with its token, accepts one tunnel and
 // one claim, and answers every refusal relay-claim gives. A claim it
@@ -43,6 +43,34 @@
 // The ledger's reply is not waited for before the claim's 200 (CLAIM-23,
 // CLAIM-44), as the Go relay's is not (N5): a collector that refuses the
 // ledger still sees the claim answered 200.
+//
+// The build side is a Guest, which takes the relay's mode as a start
+// parameter: host on a frame link, through a network stack of its own that
+// captures a connection to any address and port; vm and container on a
+// kernel interface, here a network the caller gives, with its ports at its
+// own address. It serves the lease, ARP on a frame link, DNS, the reserved
+// hosts artifacts and cwd, the control plane, and the proxy and
+// interception, and records what relay-guest-api has it record. Where that
+// document leaves the answer open, this relay is strict here too:
+//
+//   - The reserved names are read whatever their case and with a trailing
+//     dot (the Go relay matches them exactly, N23); cwd for any method but
+//     GET is refused 405, not proxied (D10).
+//   - A fixed path of artifacts is served for its one method and answered
+//     404 for another (the Go relay serves it whatever the method, D9).
+//   - An exit code that is not a signed 64-bit decimal integer is refused
+//     400 (the Go relay reads it as 0 or its leading integer, N21).
+//   - The output that crosses the 256 MiB limit is answered 413 (D11).
+//   - Every response is recorded as the bytes sent: the 502 has a length,
+//     and an upstream's header fields are written as recorded (N20).
+//   - A response that ends at the close, or says Connection: close, closes
+//     the connection after it (N17).
+//   - After the completion, a request it would record is refused 409, and
+//     nothing is recorded or sent upstream (GUEST-55; D18).
+//   - It serves DNS over TCP on a frame link (GUEST-6 lets it; D15), and
+//     its lease and its listeners are serving before the claim's 200 in
+//     every mode (D19).
+//   - A refused claim leaves it claimable in every mode (D17).
 package relay
 
 import (
@@ -171,6 +199,12 @@ func Start(ctx context.Context, cfg Config) (*Relay, error) {
 
 // Claim is the relay's claim endpoint and its token.
 func (r *Relay) Claim() attach.Endpoint { return r.endpoint }
+
+// Frames is an error: the relay holds its own end of a frame link, and its
+// attachment the harness's end (GUEST-6).
+func (r *Relay) Frames() (net.Conn, error) {
+	return nil, fmt.Errorf("relay: the harness's end of the frame link is its attachment's: %w", attach.ErrNoFrames)
+}
 
 // ReadBack is an error: a relay stores nothing to read back.
 func (r *Relay) ReadBack(context.Context) (string, error) {

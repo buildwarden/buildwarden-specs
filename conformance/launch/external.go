@@ -86,6 +86,11 @@ func (e *external) Log() []byte            { return e.log.Bytes() }
 func (e *external) Exit() string           { return "" }
 func (e *external) Stop() error            { return nil }
 
+// Frames is an error: an external relay's link is "ip".
+func (e *external) Frames() (net.Conn, error) {
+	return nil, fmt.Errorf("%s: an external relay's link is ip: %w", e.f.Path, attach.ErrNoFrames)
+}
+
 func (e *external) ReadBack(context.Context) (string, error) {
 	return "", errors.New(e.f.Path + ": a relay has no read-back")
 }

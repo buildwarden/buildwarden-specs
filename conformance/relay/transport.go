@@ -127,8 +127,20 @@ func lookup(ctx context.Context, up attach.Network, servers []netip.Addr, host s
 	if a, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		return []netip.Addr{a}, nil
 	}
+	out, err := lookupType(ctx, up, servers, host, dns.TypeA)
+	if err == nil && len(out) == 0 {
+		err = fmt.Errorf("resolving %s: no address", host)
+	}
+	return out, err
+}
+
+// lookupType is the addresses of type qtype (A or AAAA) the first of
+// servers that answers gives for host, each asked over UDP for at most
+// ResolveTimeout, in their order. An answer that is not NOERROR is an error;
+// one with no address of the type is none.
+func lookupType(ctx context.Context, up attach.Network, servers []netip.Addr, host string, qtype uint16) ([]netip.Addr, error) {
 	q := new(dns.Msg)
-	q.SetQuestion(dns.Fqdn(host), dns.TypeA)
+	q.SetQuestion(dns.Fqdn(host), qtype)
 	query, err := q.Pack()
 	if err != nil {
 		return nil, fmt.Errorf("resolving %s: %w", host, err)
@@ -145,14 +157,20 @@ func lookup(ctx context.Context, up attach.Network, servers []netip.Addr, host s
 		}
 		var out []netip.Addr
 		for _, rr := range ans.Answer {
-			if a, ok := rr.(*dns.A); ok {
-				if addr, ok := netip.AddrFromSlice(a.A.To4()); ok {
-					out = append(out, addr)
+			var ip net.IP
+			switch r := rr.(type) {
+			case *dns.A:
+				if qtype == dns.TypeA {
+					ip = r.A.To4()
+				}
+			case *dns.AAAA:
+				if qtype == dns.TypeAAAA {
+					ip = r.AAAA.To16()
 				}
 			}
-		}
-		if len(out) == 0 {
-			return nil, fmt.Errorf("resolving %s: %s gave no address", host, s)
+			if addr, ok := netip.AddrFromSlice(ip); ok {
+				out = append(out, addr)
+			}
 		}
 		return out, nil
 	}
@@ -160,27 +178,34 @@ func lookup(ctx context.Context, up attach.Network, servers []netip.Addr, host s
 }
 
 func ask(ctx context.Context, up attach.Network, server netip.Addr, query []byte, id uint16) (*dns.Msg, error) {
+	_, ans, err := askRaw(ctx, up, server, query, id)
+	return ans, err
+}
+
+// askRaw sends query to server's port 53 over UDP and returns the first
+// answer to it, as its bytes and read, waiting at most ResolveTimeout.
+func askRaw(ctx context.Context, up attach.Network, server netip.Addr, query []byte, id uint16) ([]byte, *dns.Msg, error) {
 	ctx, cancel := context.WithTimeout(ctx, ResolveTimeout)
 	defer cancel()
 	conn, err := up.Dial(ctx, "udp", netip.AddrPortFrom(server, 53).String())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close()
 	deadline, _ := ctx.Deadline()
 	_ = conn.SetDeadline(deadline)
 	if _, err := conn.Write(query); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	buf := make([]byte, 65535)
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", server, err)
+			return nil, nil, fmt.Errorf("%s: %w", server, err)
 		}
 		ans := new(dns.Msg)
 		if ans.Unpack(buf[:n]) == nil && ans.Id == id && ans.Response {
-			return ans, nil
+			return append([]byte(nil), buf[:n]...), ans, nil
 		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -85,6 +86,11 @@ type process struct {
 func (p *process) Claim() attach.Endpoint { return attach.Endpoint{} }
 
 func (p *process) Log() []byte { return p.log.Bytes() }
+
+// Frames is an error: a collector has no frame link.
+func (p *process) Frames() (net.Conn, error) {
+	return nil, fmt.Errorf("%s: a collector has no build link: %w", p.f.Path, attach.ErrNoFrames)
+}
 
 func (p *process) Exit() string {
 	p.mu.Lock()

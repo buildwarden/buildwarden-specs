@@ -34,6 +34,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/icmp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
+	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/attach"
 )
@@ -181,6 +182,31 @@ func (st *Stack) transmit() {
 
 // Config is what the stack was made with.
 func (st *Stack) Config() Config { return st.cfg }
+
+// captureQueue is how many captured connections the stack completes the
+// handshake of before handle has taken them; a connection beyond it is
+// reset.
+const captureQueue = 64
+
+// Capture has the stack accept every TCP connection that no listener of its
+// own takes, to any address it takes as its own and any port, and hand each
+// to handle on a goroutine of its own. The connection's LocalAddr is the
+// address and port the peer connected to, so that handle can select the
+// service by them: the capture of a relay on a frame link, which accepts
+// connections to any address and port (relay-guest-api, GUEST-6).
+func (st *Stack) Capture(handle func(net.Conn)) {
+	fwd := tcp.NewForwarder(st.s, 0, captureQueue, func(r *tcp.ForwarderRequest) {
+		var wq waiter.Queue
+		ep, e := r.CreateEndpoint(&wq)
+		if e != nil {
+			r.Complete(true)
+			return
+		}
+		r.Complete(false)
+		go handle(gonet.NewTCPConn(&wq, ep))
+	})
+	st.s.SetTransportProtocolHandler(tcp.ProtocolNumber, fwd.HandlePacket)
+}
 
 // Close stops the stack and closes its link. Every socket of the stack
 // fails from then on.

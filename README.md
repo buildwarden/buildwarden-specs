@@ -126,13 +126,25 @@ These hold in every specification directory.
   that tests a relay (`collector-outputs`, `collector-inputs`, and the
   bootstrap config it serves), startable in every form a collector target
   may declare and recording each request it received in order; `relay` is
-  the relay that tests a collector (`relay-claim`'s relay, and the relay's
-  side of `collector-outputs` and `collector-inputs`), which a collector
-  that claims reaches at a claim address on loopback; `ledger` verifies a
-  ledger the relay wrote, and `ledgerwriter` writes the harness relay's
-  own, each written separately from buildwarden/buildwarden's
-  `specs/build-ledger/v1.md` at the commit its package comment names. Their package comments say how each reads what its
-  documents leave open.
+  the harness's relay, both the relay that tests a collector (`relay-claim`'s
+  relay, and the relay's side of `collector-outputs` and `collector-inputs`)
+  and a relay under test in its own right, with its build side
+  (`relay-guest-api`, and the relay's part of `bootstrap-config`) in each of
+  the three modes; `buildenv` is the build environment, on a frame link with
+  its own network stack (`netstack`, `dhcp`) or on an IP link; `upstream` is
+  the relay's upstream world, its resolvers, origins and their CA; `ledger`
+  verifies a ledger the relay wrote, and `ledgerwriter` writes the harness
+  relay's own, each written separately from buildwarden/buildwarden's
+  `specs/build-ledger/v1.md` at the commit its package comment names. Their
+  package comments say how each reads what its documents leave open.
+- **The in-process attachment.** `conformance/inprocess` gives the runner the
+  harness's own relay, in each of its three modes, and its own collector, in
+  each of its forms, from memory, on in-memory networks (`memnet`): what a
+  launcher gives a real component from the kernel. A module's `go test` runs
+  its suite against each of these configurations, so that a suite and the
+  model written beside it cannot disagree unnoticed, with no root, namespace
+  or container runtime. It is not a launcher: no target file and no command
+  can name it.
 - **Versions.** Each directory's `CHANGELOG.md` starts with the version its
   next release will be, `## vX.Y.Z`, newest first; a pull request that changes
   a directory adds that version. The command reads its version from there. A

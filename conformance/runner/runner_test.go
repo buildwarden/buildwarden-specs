@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"strings"
@@ -57,6 +58,7 @@ func (i *fakeInstance) Claim() attach.Endpoint {
 	return attach.Endpoint{Address: fmt.Sprintf("127.0.0.1:%d", 4000+i.n)}
 }
 func (i *fakeInstance) ReadBack(context.Context) (string, error) { return "", errors.New("none") }
+func (i *fakeInstance) Frames() (net.Conn, error)                { return nil, attach.ErrNoFrames }
 func (i *fakeInstance) Log() []byte                              { return []byte(fmt.Sprintf("instance %d wrote this\n", i.n)) }
 func (i *fakeInstance) Exit() string                             { return i.end }
 func (i *fakeInstance) Stop() error {

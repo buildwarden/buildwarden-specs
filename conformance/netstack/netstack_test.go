@@ -269,3 +269,54 @@ func ipChecksum(b []byte) []byte {
 	ip[10], ip[11] = byte(c>>8), byte(c)
 	return b
 }
+
+func TestCaptureTakesAnyAddressAndPort(t *testing.T) {
+	t.Parallel()
+	ea, eb := memnet.Frames()
+	a, err := New(ea, Config{MAC: macA, Address: netip.MustParsePrefix("10.0.0.1/24"), AnyAddress: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := New(eb, Config{MAC: macB, Address: netip.MustParsePrefix("10.0.0.2/24"), Gateway: netip.MustParseAddr("10.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	// A listener of the stack's own takes its port; Capture takes the rest.
+	ln, err := a.Network().Listen(ctx, "tcp", "10.0.0.1:7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		_, _ = c.Write([]byte("listener"))
+		_ = c.Close()
+	}()
+	a.Capture(func(c net.Conn) {
+		_, _ = c.Write([]byte("captured " + c.LocalAddr().String()))
+		_ = c.Close()
+	})
+	for addr, want := range map[string]string{
+		"10.0.0.1:7":        "listener",
+		"10.0.0.1:9999":     "captured 10.0.0.1:9999",
+		"198.51.100.80:443": "captured 198.51.100.80:443",
+		"203.0.113.9:12345": "captured 203.0.113.9:12345",
+	} {
+		c, err := b.Network().Dial(ctx, "tcp", addr)
+		if err != nil {
+			t.Fatalf("%s: %v", addr, err)
+		}
+		got, err := io.ReadAll(c)
+		_ = c.Close()
+		if err != nil || string(got) != want {
+			t.Errorf("%s: read %q, %v; want %q", addr, got, err, want)
+		}
+	}
+}

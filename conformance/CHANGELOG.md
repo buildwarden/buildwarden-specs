@@ -8,5 +8,6 @@ line of `go.work` to it.
 ## v0.1.0
 
 - The first release: the target-file format and its launchers, the runner and
-  its report, the roles each suite drives a component through, and the checks
-  `ci` runs.
+  its report, the roles each suite drives a component through, the in-process
+  attachment that runs every suite against the harness's own relay and
+  collector under `go test`, and the checks `ci` runs.

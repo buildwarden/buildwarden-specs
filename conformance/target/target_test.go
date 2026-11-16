@@ -115,7 +115,7 @@ address_by_launcher = true
 `,
 			want: Declared{
 				Role: "relay", Launcher: "external", Mode: "container", Link: "ip",
-				AddressByLauncher: true, NoClaimToken: true, FreshInstances: true,
+				AddressByLauncher: true, Address: "203.0.113.7", NoClaimToken: true, FreshInstances: true,
 			},
 		},
 		{

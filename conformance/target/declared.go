@@ -19,6 +19,11 @@ type Declared struct {
 	Link              string
 	BuildLink         *BuildLink
 	AddressByLauncher bool
+	// Address is the relay's own address on its build link where its
+	// launcher assigns it (AddressByLauncher), and empty where the harness
+	// cannot know it before a lease. A case on an "ip" link connects to it,
+	// or to BuildLink's relay.
+	Address string
 	// ResolverConfig says that the relay is started with a resolver
 	// configuration the harness gives it, which the cases for an absent
 	// upstream_dns need. An external relay is not.
@@ -72,6 +77,7 @@ func (f File) Declared() Declared {
 	if r := f.Relay; r != nil {
 		d.Mode, d.Link, d.BuildLink, d.AddressByLauncher = r.Mode, r.Link, r.BuildLink, r.AddressByLauncher
 		if f.Launcher == "external" {
+			d.Address = f.External.Address
 			d.ClaimToken = f.External.Token != ""
 			d.NoClaimToken = !d.ClaimToken
 		} else {

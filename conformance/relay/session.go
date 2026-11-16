@@ -195,6 +195,14 @@ func (s *Session) Activity() {
 	s.mu.Unlock()
 }
 
+// Completed says whether the build has completed: from then on nothing is
+// recorded or sent but a repeated completion (GUEST-55).
+func (s *Session) Completed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completed
+}
+
 // Heartbeats is the number of heartbeats sent so far.
 func (s *Session) Heartbeats() int {
 	s.mu.Lock()
@@ -284,32 +292,8 @@ func (s *Session) Exchange(ctx context.Context, x Exchange) ([]CaptureResult, er
 		return nil, err
 	}
 	defer s.outputs.Done()
-	l := s.ledger
-	ch, err := l.Open(ledgerwriter.HTTPOpen, x.openMeta())
-	if err != nil {
+	if err := s.record(x); err != nil {
 		return nil, err
-	}
-	steps := []func() error{
-		func() error {
-			return l.Checkpoint(ch, ledgerwriter.Out(x.Header), ledgerwriter.HTTPHeaders, headerMeta(x.Header))
-		},
-	}
-	if x.Body != nil {
-		steps = append(steps, func() error {
-			return l.Checkpoint(ch, ledgerwriter.Out(x.Body), ledgerwriter.HTTPBody, nil)
-		})
-	}
-	steps = append(steps,
-		func() error {
-			return l.Checkpoint(ch, ledgerwriter.In(x.ResponseHeader), ledgerwriter.HTTPHeaders, headerMeta(x.ResponseHeader))
-		},
-		func() error {
-			return l.Close(ch, ledgerwriter.In(x.ResponseBody), ledgerwriter.HTTPBody, map[string]any{"status": int64(x.Status)})
-		})
-	for _, step := range steps {
-		if err := step(); err != nil {
-			return nil, err
-		}
 	}
 	type part struct {
 		name string
@@ -342,6 +326,53 @@ func (s *Session) Exchange(ctx context.Context, x Exchange) ([]CaptureResult, er
 		out = append(out, CaptureResult{Name: name, Reply: rep, Err: err})
 	}
 	return out, nil
+}
+
+// Record records x as Exchange does and sends no capture: what the relay
+// serves the build from its collector (the build script, the bootstrap
+// config, a file of the context), which is an input recorded as the body of
+// a GET's response and not a proxied exchange (relay-guest-api, GUEST-49;
+// relay-claim, CLAIM-25).
+func (s *Session) Record(x Exchange) error {
+	if err := s.begin(); err != nil {
+		return err
+	}
+	defer s.outputs.Done()
+	return s.record(x)
+}
+
+// record writes x's records: its opening, its request's header fields and
+// body, and its response's header fields, and closes it with the
+// response's body.
+func (s *Session) record(x Exchange) error {
+	l := s.ledger
+	ch, err := l.Open(ledgerwriter.HTTPOpen, x.openMeta())
+	if err != nil {
+		return err
+	}
+	steps := []func() error{
+		func() error {
+			return l.Checkpoint(ch, ledgerwriter.Out(x.Header), ledgerwriter.HTTPHeaders, headerMeta(x.Header))
+		},
+	}
+	if x.Body != nil {
+		steps = append(steps, func() error {
+			return l.Checkpoint(ch, ledgerwriter.Out(x.Body), ledgerwriter.HTTPBody, nil)
+		})
+	}
+	steps = append(steps,
+		func() error {
+			return l.Checkpoint(ch, ledgerwriter.In(x.ResponseHeader), ledgerwriter.HTTPHeaders, headerMeta(x.ResponseHeader))
+		},
+		func() error {
+			return l.Close(ch, ledgerwriter.In(x.ResponseBody), ledgerwriter.HTTPBody, map[string]any{"status": int64(x.Status)})
+		})
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // capture sends one capture: no length in advance, and the trailer

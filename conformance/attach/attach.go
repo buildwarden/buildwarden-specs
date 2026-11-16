@@ -87,6 +87,11 @@ type Instance interface {
 	// Claim is a relay instance's claim endpoint; it is empty for a
 	// collector.
 	Claim() Endpoint
+	// Frames is the harness's end of a relay instance's frame link: a
+	// socket that carries one Ethernet frame per datagram, which the build
+	// environment brings its own network stack to. It is an error for an
+	// instance whose build link is not "frames", and for a collector.
+	Frames() (net.Conn, error)
 	// ReadBack returns a directory, in the disk layout, of what a
 	// collector instance stored. It is called after the session's
 	// completion and is an error for a target that declares no read-back.
@@ -119,3 +124,7 @@ type Attachment interface {
 
 // ErrNoSide is returned by Network for a side the component has not.
 var ErrNoSide = errors.New("the component under test has no such side")
+
+// ErrNoFrames is wrapped by Instance.Frames's error for an instance that has
+// no frame link.
+var ErrNoFrames = errors.New("the instance has no frame link")
