@@ -16,9 +16,12 @@ import (
 )
 
 // ownAddress: the relay serves the build at its own address on the build
-// link: the lease's server identifier, router and DNS server on a frame
-// link, and the declared address on a kernel interface, which answers
-// DNS for the reserved names with itself.
+// link: on a frame link the build environment, which learns the relay's
+// address from the lease, reaches it at the build_link's relay address,
+// and on either kind of link DNS asked of the relay answers the reserved
+// names with that address. The lease's fields themselves are GUEST-9's,
+// checked by leaseAnswered; on a kernel interface the case gives the build
+// environment the declared address, so there is nothing to compare.
 var ownAddress = runner.Case{
 	Name:  "the relay serves the build environment over IPv4 at its own address on the build link",
 	Cites: []string{"GUEST-1"},
@@ -29,21 +32,8 @@ var ownAddress = runner.Case{
 		r.claim()
 		env := r.build(nil)
 		relay := r.relayAddr()
-		if l, ok := env.Lease(); ok {
-			if l.Server != relay {
-				t.Errorf("the lease's server identifier is %s, want the build_link's relay address %s", l.Server, relay)
-			}
-			for _, v := range []struct {
-				name  string
-				addrs []netip.Addr
-			}{{"router", l.Router}, {"DNS server", l.DNS}} {
-				if len(v.addrs) != 1 || v.addrs[0] != relay {
-					t.Errorf("the lease's %s is %v, want the relay's address %s", v.name, v.addrs, relay)
-				}
-			}
-		}
-		if env.Relay() != relay {
-			t.Errorf("the build environment reaches the relay at %s, want %s", env.Relay(), relay)
+		if r.d.Link == buildenv.Frames && env.Relay() != relay {
+			t.Errorf("the build environment reaches the relay at %s, the lease's server identifier, want %s", env.Relay(), relay)
 		}
 		as, err := env.Resolve(t.Context(), "artifacts")
 		if err != nil {

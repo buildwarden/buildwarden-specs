@@ -11,10 +11,12 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/miekg/dns"
 
+	"github.com/buildwarden/buildwarden-specs/conformance/attach"
 	"github.com/buildwarden/buildwarden-specs/conformance/buildenv"
 	"github.com/buildwarden/buildwarden-specs/conformance/netstack"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
@@ -94,6 +96,12 @@ var arpAnswered = runner.Case{
 // captured connection. Every frame the relay sent before the build
 // environment's first is to the broadcast address, and every IPv4 frame
 // after it to the build environment's MAC address.
+//
+// Every frame here comes from one MAC address, so the case cannot tell a
+// relay that takes the first frame's source, as GUEST-4 requires, from one
+// that addresses frames by ARP or by the latest source: the harness's own
+// model does the latter, and a check with a first frame from a second MAC
+// address would fail it. That check waits on a change to the model.
 var macLearned = runner.Case{
 	Name:    "on a frame link, the relay sends to the MAC address of the first frame it receives, and before it to the broadcast address",
 	Cites:   []string{"GUEST-4"},
@@ -267,6 +275,24 @@ var udpOnly = runner.Case{
 		p := newParty(t, r.frames(), guestMAC, r.guestAddr())
 		relay := r.relayAddr()
 		mac := p.relayMAC(relay)
+		// A datagram the relay forwarded to the origin's address would
+		// reach this listener, which the upstream holds at the origin's
+		// address beside its server.
+		sink, err := t.Network(attach.Upstream).ListenPacket(t.Context(), "udp", netip.AddrPortFrom(originAddr, 9999).String())
+		if err != nil {
+			t.Fatalf("a UDP listener at the origin's %s:9999: %v", originAddr, err)
+		}
+		t.Cleanup(func() { _ = sink.Close() })
+		var sunk atomic.Int32
+		go func() {
+			buf := make([]byte, 1<<16)
+			for {
+				if _, _, err := sink.ReadFrom(buf); err != nil {
+					return
+				}
+				sunk.Add(1)
+			}
+		}()
 		query := func(name string, id uint16) []byte {
 			q := new(dns.Msg)
 			q.SetQuestion(dns.Fqdn(name), dns.TypeA)
@@ -324,6 +350,9 @@ var udpOnly = runner.Case{
 		}
 		for _, q := range r.up.Resolvers[0].Queries() {
 			t.Errorf("the resolver at %s received the query for %s sent to its address on the build link: the relay forwarded the build's datagram", firstResolver, q.Name)
+		}
+		if n := sunk.Load(); n > 0 {
+			t.Errorf("the origin's %s:9999 received %d datagrams: the relay forwarded the build's datagram there", originAddr, n)
 		}
 	},
 }

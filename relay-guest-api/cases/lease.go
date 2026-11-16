@@ -230,7 +230,10 @@ func newXID() uint32 { return rand.Uint32() }
 // checkLease checks a reply to a client's message m against GUEST-8 and
 // GUEST-9: from the relay's address at port 67 (and, on a frame link, to
 // 255.255.255.255:68), a BOOTREPLY of type want for m's xid and chaddr,
-// with the lease of the claim's build_link.
+// with the lease of the claim's build_link. On a kernel interface the
+// client's socket does not give a datagram's destination, so there the
+// reply's 255.255.255.255:68 is not checked: a relay that sent to yiaddr,
+// where the build side held that address, would pass.
 func (r *relayRun) checkLease(what string, rep leaseReply, got dhcp.Message, m dhcp.Message, want byte) {
 	t := r.t
 	relay, guest, prefix := r.relayAddr(), r.guestAddr(), r.linkPrefix()

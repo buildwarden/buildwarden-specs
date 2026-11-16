@@ -157,24 +157,27 @@ var refusedHost = runner.Case{
 		} {
 			addrs = append(addrs, netip.MustParseAddr(a))
 		}
+		// IPv6 addresses are given as literals only: the harness's
+		// resolvers answer A queries alone, so a name has no AAAA record.
 		var hosts []string
+		var v4 []netip.Addr
 		for i, a := range addrs {
 			if a.Is6() {
 				hosts = append(hosts, "["+a.String()+"]")
-			} else {
-				hosts = append(hosts, a.String())
+				continue
 			}
+			v4 = append(v4, a)
 			name := fmt.Sprintf("refused-%d.example", i)
 			for _, res := range r.up.Resolvers {
 				res.Set(name, a)
 			}
-			hosts = append(hosts, name)
+			hosts = append(hosts, a.String(), name)
 		}
 		for _, h := range hosts {
 			resp, body, err := proxied(t.Context(), env, h)
 			unreachable(t, "GET / with Host "+h, resp, body, err)
 		}
-		pairedRefused(t, r, env, "refused-paired", addrs)
+		pairedRefused(t, r, env, "refused-paired", v4)
 	},
 }
 
