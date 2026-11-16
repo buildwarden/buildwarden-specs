@@ -15,14 +15,19 @@ var endpoints = []string{"/v1/tunnel", "/v1/claim"}
 
 // methodsRefused sends every method but POST to both endpoints, each on a
 // connection of its own and with no Authorization header, so that a relay
-// that looked at the token first would answer 401. The relay is the shared
-// one and stays as it was.
+// that looked at the token first would answer 401. That ordering (CLAIM-42)
+// shows only where the shared relay was started with a token: against a
+// relay that cannot be (NoClaimToken without ClaimToken), only the 405 is
+// checked. The relay is the shared one and stays as it was.
 var methodsRefused = runner.Case{
 	Name:  "both endpoints answer any method but POST 405 before the token",
 	Cites: []string{"CLAIM-2", "CLAIM-4", "CLAIM-42", "CLAIM-51"},
 	Role:  "relay",
 	Run: func(t *runner.T) {
 		r := startRelay(t, attach.Params{})
+		if r.cl.Endpoint.Token == "" {
+			t.Logf("the relay has no claim token: that it answers 405 before it looks at the token is not observable")
+		}
 		for _, path := range endpoints {
 			for _, m := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 				rep, err := r.cl.Do(t.Context(), m, path, http.Header{}, nil)

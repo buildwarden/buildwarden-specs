@@ -281,9 +281,13 @@ func checkLease(t *runner.T, l dhcp.Lease, link map[string]string) {
 }
 
 // vmNoLink claims a fresh vm-mode relay without a build_link: its build
-// interface has an address, which it keeps, so the claim is accepted.
+// interface has an address, so the claim is accepted. Only that acceptance
+// is checked. That the relay keeps that address, with its network as the
+// build link, and that it refuses the claim when the interface has none
+// (CLAIM-38) are not: no target declares the address its build interface
+// holds before the claim, or a way to start one with none.
 var vmNoLink = runner.Case{
-	Name:    "a vm-mode relay claimed without a build_link keeps its address",
+	Name:    "a vm-mode relay claimed without a build_link accepts the claim",
 	Cites:   []string{"CLAIM-38"},
 	Role:    "relay",
 	Ends:    true,

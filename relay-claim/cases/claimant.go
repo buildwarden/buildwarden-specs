@@ -3,6 +3,7 @@ package cases
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"mime"
@@ -229,8 +230,12 @@ func claimThrough(t *runner.T, dropFirst bool) *recorder {
 	t.Cleanup(func() { _ = r.Stop() })
 	rec := startRecorder(t, n, r.Claim().Address, dropFirst)
 	in := t.Instance(attach.Params{Claim: rec.addr(), Token: claimantToken, Out: t.TempDir(), Capture: "none"})
-	if _, err := r.Session(t.Context()); err != nil {
-		t.Fatalf("the collector's claim: %v; its log:\n%s", err, in.Log())
+	// A claimant that never completes its claim fails here, within a bound
+	// of its own, and not at the runner's limit for a case.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*within)
+	defer cancel()
+	if _, err := r.Session(ctx); err != nil {
+		t.Fatalf("the collector's claim, within %s: %v; its log:\n%s", 3*within, err, in.Log())
 	}
 	select {
 	case <-rec.claimed:

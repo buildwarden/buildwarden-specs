@@ -8,4 +8,4 @@ CLAIM-27 Which roots the relay's system roots are is its host's, and no target d
 CLAIM-34 What a claimant does with a 200 that has no ca_cert is its own: it sends nothing more that the protocol names, so a suite has no reply of the claimant's to observe.
 CLAIM-35 That a claimant does not retry a refused request is an absence over its whole life; a suite that waited a while for a retry would give a verdict that depends on timing (TEST-04).
 CLAIM-36 Which addresses and routes a vm-mode relay's other interfaces hold is its host's, and no target declares them, so a suite cannot choose a build_link that collides with one.
-CLAIM-45 No case asserts what the relay's build side serves at the moment of the claim's 200 (the design's harness, Known divergences D19): a request sent then races with the reply's delivery, so its verdict would depend on timing (TEST-04).
+CLAIM-45 The design's harness polls the relay's /health before its first build-side request and asserts nothing about the build-facing listeners at the moment of the claim's 200 (The harness; Known divergences, D19), so no case checks what they serve then.
