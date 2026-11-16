@@ -103,15 +103,18 @@ type party struct {
 
 	mu     sync.Mutex
 	frames []frame
-	kick   chan struct{}
-	err    error
+	// changed is closed, and replaced, at each frame read and at the
+	// reader's end: every waiter wakes, the case's and the lease reader's
+	// on the same party alike, so that none takes another's wakeup.
+	changed chan struct{}
+	err     error
 }
 
 // newParty starts a party on link. Its reader ends when the case does: its
 // cleanup sets a read deadline that has passed, and the instance's Stop
 // closes the link.
 func newParty(t *runner.T, link net.Conn, mac net.HardwareAddr, ip netip.Addr) *party {
-	p := &party{t: t, link: link, mac: mac, ip: ip, kick: make(chan struct{}, 1)}
+	p := &party{t: t, link: link, mac: mac, ip: ip, changed: make(chan struct{})}
 	go p.read()
 	t.Cleanup(func() { _ = link.SetReadDeadline(time.Unix(1, 0)) })
 	return p
@@ -124,8 +127,8 @@ func (p *party) read() {
 		if err != nil {
 			p.mu.Lock()
 			p.err = err
-			p.mu.Unlock()
 			p.signal()
+			p.mu.Unlock()
 			return
 		}
 		b := append([]byte(nil), buf[:n]...)
@@ -136,16 +139,15 @@ func (p *party) read() {
 		}
 		p.mu.Lock()
 		p.frames = append(p.frames, frame{At: time.Now(), Bytes: b})
-		p.mu.Unlock()
 		p.signal()
+		p.mu.Unlock()
 	}
 }
 
+// signal wakes every waiter; p.mu is held.
 func (p *party) signal() {
-	select {
-	case p.kick <- struct{}{}:
-	default:
-	}
+	close(p.changed)
+	p.changed = make(chan struct{})
 }
 
 // send writes one frame, and fails the case when the link refuses it.
@@ -194,13 +196,13 @@ func (p *party) awaitAt(from int, d time.Duration, match func([]byte) bool) (fra
 			}
 		}
 		from = len(p.frames)
-		err := p.err
+		err, changed := p.err, p.changed
 		p.mu.Unlock()
 		if err != nil {
 			return frame{}, 0, false
 		}
 		select {
-		case <-p.kick:
+		case <-changed:
 		case <-deadline.C:
 			return frame{}, 0, false
 		case <-p.t.Context().Done():
