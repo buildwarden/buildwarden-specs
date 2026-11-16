@@ -13,6 +13,7 @@ import (
 	"github.com/buildwarden/buildwarden-specs/conformance"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
+	"github.com/buildwarden/buildwarden-specs/conformance/target"
 )
 
 // Exit statuses of Main.
@@ -92,8 +93,12 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
+	tf, err := target.Read(*targetFile)
+	if err != nil {
+		return err
+	}
 	if len(cases) == 0 {
-		fmt.Fprintf(stdout, "%s %s: the suite has no cases yet; nothing was run against %s\n", s.Directory, l.Version, *targetFile)
+		fmt.Fprintf(stdout, "%s %s: the suite has no cases yet; nothing was run against %s (role %s)\n", s.Directory, l.Version, *targetFile, tf.Role)
 		return nil
 	}
 	return fmt.Errorf("%s %s has %d cases, and this harness cannot run cases yet", s.Directory, l.Version, len(cases))

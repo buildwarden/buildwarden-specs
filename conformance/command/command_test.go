@@ -2,6 +2,8 @@ package command
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -30,6 +32,15 @@ func TestSubcommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	threeReqs := testSpec("**CLAIM-1.** a\n\n**CLAIM-2.** b\n\n**CLAIM-3.** c\n", "CLAIM-2 a person reads it\n")
+	dir := t.TempDir()
+	relayTarget := filepath.Join(dir, "relay-host.toml")
+	if err := os.WriteFile(relayTarget, []byte("role = \"relay\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	badTarget := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(badTarget, []byte("role = \"driver\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	cited := []runner.Case{
 		{Name: "claim-ok", Cites: []string{"CLAIM-1"}},
 		{Name: "claim-again", Cites: []string{"CLAIM-1"}},
@@ -54,11 +65,19 @@ func TestSubcommands(t *testing.T) {
 		{name: "run without a target", s: threeReqs, args: []string{"run"}, wantStatus: ExitUsage, wantErr: "-target is required"},
 		{name: "run with an unknown flag", s: threeReqs, args: []string{"run", "-x"}, wantStatus: ExitUsage, wantErr: "flag provided but not defined: -x"},
 		{
-			name: "run with no cases", s: threeReqs, args: []string{"run", "-target", "relay-host.toml"}, wantStatus: ExitOK,
-			wantOut: "relay-claim v0.4.0: the suite has no cases yet; nothing was run against relay-host.toml\n",
+			name: "run with no cases", s: threeReqs, args: []string{"run", "-target", relayTarget}, wantStatus: ExitOK,
+			wantOut: "relay-claim v0.4.0: the suite has no cases yet; nothing was run against " + relayTarget + " (role relay)\n",
 		},
 		{
-			name: "run with cases", s: threeReqs, cases: cited, args: []string{"run", "-target", "t.toml"}, wantStatus: ExitFail,
+			name: "run against a bad target file", s: threeReqs, args: []string{"run", "-target", badTarget}, wantStatus: ExitFail,
+			wantErr: `role "driver" is not one this harness knows`,
+		},
+		{
+			name: "run against a missing target file", s: threeReqs, args: []string{"run", "-target", filepath.Join(dir, "absent.toml")}, wantStatus: ExitFail,
+			wantErr: "absent.toml",
+		},
+		{
+			name: "run with cases", s: threeReqs, cases: cited, args: []string{"run", "-target", relayTarget}, wantStatus: ExitFail,
 			wantErr: "relay-claim v0.4.0 has 2 cases, and this harness cannot run cases yet",
 		},
 		{
