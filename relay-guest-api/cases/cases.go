@@ -48,6 +48,7 @@ var Cases = []runner.Case{
 	artifactStored,
 	artifactNameRefused,
 	artifactNotStored,
+	artifactTooLarge,
 	fixedNotUploads,
 	notFound,
 	cwdServed,

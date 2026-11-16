@@ -1,7 +1,9 @@
 package cases
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"slices"
@@ -414,10 +416,64 @@ var artifactNameRefused = runner.Case{
 	},
 }
 
+// artifactTooLarge: an artifact of 2 GiB and one byte is answered 413 with
+// "artifact size limit exceeded", and is not recorded as stored. The
+// collector's side of /v1/artifacts/big.bin is the case's: it counts what
+// it receives and discards it, so that no collector stores 2 GiB. The body
+// is written while the reply is read, so that a relay which refuses it by
+// its Content-Length, before it has read it, is answered as soon as it
+// replies.
+var artifactTooLarge = runner.Case{
+	Name:  "an artifact over 2 GiB is answered 413 artifact size limit exceeded, and not recorded as stored",
+	Cites: []string{"GUEST-29"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		const size = relayArtifactLimit + 1
+		discard := func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusOK)
+		}
+		w := startWeb(t, webOpts{override: map[string]http.HandlerFunc{"/v1/artifacts/big.bin": discard}})
+		c := w.conn(80, "")
+		_ = c.SetDeadline(time.Now().Add(100 * time.Second))
+		wrote := make(chan struct{})
+		go func() {
+			defer close(wrote)
+			if _, err := fmt.Fprintf(c, "POST /big.bin HTTP/1.1\r\nHost: artifacts\r\nConnection: close\r\nContent-Length: %d\r\n\r\n", size); err != nil {
+				return
+			}
+			chunk := pattern(1<<20, 23)
+			for left := int64(size); left > 0; left -= int64(len(chunk)) {
+				if _, err := c.Write(chunk[:min(left, int64(len(chunk)))]); err != nil {
+					return
+				}
+			}
+		}()
+		resp, err := http.ReadResponse(bufio.NewReader(c), &http.Request{Method: http.MethodPost})
+		if err != nil {
+			t.Fatalf("POST http://artifacts/big.bin of %d bytes: %v", size, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = c.Close()
+		<-wrote
+		if err != nil {
+			t.Fatalf("POST http://artifacts/big.bin of %d bytes: reading the body of a %d: %v", size, resp.StatusCode, err)
+		}
+		refused(t, fmt.Sprintf("POST http://artifacts/big.bin of %d bytes", size), reply{resp.StatusCode, resp.Header, body}, http.StatusRequestEntityTooLarge, "artifact size limit exceeded\n")
+		l := w.exit()
+		if names := artifactNames(l); len(names) > 0 {
+			t.Errorf("the ledger records the artifacts %q, though the only one was over 2 GiB", names)
+		}
+	},
+}
+
+// relayArtifactLimit is the largest artifact a relay stores, 2 GiB
+// (GUEST-29).
+const relayArtifactLimit = 2 << 30
+
 // artifactNotStored: an artifact the collector does not store is answered
-// 500, and is not recorded as stored. The 413 of an artifact over 2 GiB is
-// not sent: that is 2 GiB through the build link for every relay a suite
-// runs, and the harness's collector stores no body that large.
+// 500, and is not recorded as stored.
 var artifactNotStored = runner.Case{
 	Name:  "an artifact the collector does not store is answered 500, and not recorded as stored",
 	Cites: []string{"GUEST-29"},
