@@ -1,2 +1,10 @@
 # The requirements of bootstrap-config/v1.md that no case of its suite checks, one to a
 # line: the identifier, a space and the reason (see the README's conventions).
+BOOTCFG-7 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-8 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-9 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-10 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-11 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-12 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-13 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
+BOOTCFG-14 A requirement of the executor, which reads the config: the executor's cases are S2's item's, which changes what initialize does (a11 of the seam-specs design), and no case runs the executor before it.
