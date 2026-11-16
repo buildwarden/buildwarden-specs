@@ -42,22 +42,24 @@ func claims(d target.Declared) string {
 }
 
 // seen is one request the recorder read from the claimant, and what the
-// relay answered it.
+// relay answered it. Its marks are the recorder's sequence numbers (step),
+// which order what the recorder read across its goroutines; a clock does
+// not, since two readings on a coarse clock are equal. A mark of 0 is none.
 type seen struct {
 	method, path string
 	header       http.Header
 	body         []byte
 	// at is when the request, its body included, had been read, before it
 	// was passed on.
-	at time.Time
+	at uint64
 	// status is the relay's answer, and answered when the recorder had read
 	// it, before it passed it on.
 	status   int
-	answered time.Time
+	answered uint64
 	// firstHeaders is, on a tunnel, when the recorder read the claimant's
 	// first HTTP/2 HEADERS frame, the start of its first reply to the
 	// relay, before it passed it on.
-	firstHeaders time.Time
+	firstHeaders uint64
 }
 
 // recorder stands between a claimant under test and the harness's relay at
@@ -73,6 +75,7 @@ type recorder struct {
 	dropFirst bool
 
 	mu      sync.Mutex
+	steps   uint64
 	conns   int
 	reqs    []*seen
 	claimed chan struct{}
@@ -91,6 +94,12 @@ func startRecorder(t *runner.T, n attach.Network, relayAddr string, dropFirst bo
 }
 
 func (rec *recorder) addr() string { return rec.ln.Addr().String() }
+
+// step is the recorder's next sequence number, from 1. The caller holds mu.
+func (rec *recorder) step() uint64 {
+	rec.steps++
+	return rec.steps
+}
 
 func (rec *recorder) accept() {
 	for {
@@ -146,8 +155,9 @@ func (rec *recorder) serve(c net.Conn) {
 		return
 	}
 	body, _ := io.ReadAll(req.Body)
-	s := &seen{method: req.Method, path: req.URL.RequestURI(), header: req.Header, body: body, at: time.Now()}
+	s := &seen{method: req.Method, path: req.URL.RequestURI(), header: req.Header, body: body}
 	rec.mu.Lock()
+	s.at = rec.step()
 	rec.reqs = append(rec.reqs, s)
 	rec.mu.Unlock()
 	// Pass on what was read of the request, and not what the reader has
@@ -167,9 +177,8 @@ func (rec *recorder) serve(c net.Conn) {
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		_, _ = io.Copy(io.Discard, resp.Body)
 	}
-	now := time.Now()
 	rec.mu.Lock()
-	s.status, s.answered = resp.StatusCode, now
+	s.status, s.answered = resp.StatusCode, rec.step()
 	rec.mu.Unlock()
 	if req.URL.Path == "/v1/claim" && resp.StatusCode == http.StatusOK {
 		rec.once.Do(func() { close(rec.claimed) })
@@ -207,8 +216,8 @@ func (rec *recorder) frames(s *seen, from io.Reader, to io.Writer) {
 		}
 		if hdr[3] == 1 {
 			rec.mu.Lock()
-			if s.firstHeaders.IsZero() {
-				s.firstHeaders = time.Now()
+			if s.firstHeaders == 0 {
+				s.firstHeaders = rec.step()
 			}
 			rec.mu.Unlock()
 		}
@@ -300,11 +309,11 @@ var claimantRequests = runner.Case{
 			t.Errorf("the tunnel request is %s %s with Connection %q, Upgrade %q, Content-Length %q and %d bytes of body; want POST, Upgrade, warden-tunnel, 0 and none",
 				tunnel.method, tunnel.path, tunnel.header.Values("Connection"), tunnel.header.Values("Upgrade"), tunnel.header.Values("Content-Length"), len(tunnel.body))
 		}
-		if tunnel.status != http.StatusSwitchingProtocols || !tunnel.answered.Before(claimed.at) {
-			t.Errorf("the claim was read at %v, before the tunnel's 101 had been passed to the claimant (%d at %v)", claimed.at, tunnel.status, tunnel.answered)
+		if tunnel.status != http.StatusSwitchingProtocols || tunnel.answered == 0 || tunnel.answered >= claimed.at {
+			t.Errorf("the claim was read at step %d, before the tunnel's 101 had been passed to the claimant (%d at step %d)", claimed.at, tunnel.status, tunnel.answered)
 		}
-		if tunnel.firstHeaders.IsZero() || !tunnel.firstHeaders.Before(claimed.answered) {
-			t.Errorf("the claimant had sent no reply on the tunnel when the relay answered its claim (its first HEADERS frame at %v, the 200 at %v)", tunnel.firstHeaders, claimed.answered)
+		if tunnel.firstHeaders == 0 || tunnel.firstHeaders >= claimed.answered {
+			t.Errorf("the claimant had sent no reply on the tunnel when the relay answered its claim (its first HEADERS frame at step %d, the 200 at step %d)", tunnel.firstHeaders, claimed.answered)
 		}
 	},
 }
