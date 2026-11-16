@@ -5,4 +5,6 @@ package cases
 import "github.com/buildwarden/buildwarden-specs/conformance/runner"
 
 // Cases are the suite's cases.
-var Cases = []runner.Case{}
+var Cases = []runner.Case{
+	oneOutput,
+}

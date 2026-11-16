@@ -46,3 +46,13 @@ var Models = []Model{
 	// dhcp).
 	{Directory: "relay-guest-api", Version: "v0.1.0"},
 }
+
+// ModelList is Models as a report names them: each a directory, a space and
+// its version.
+func ModelList() []string {
+	out := make([]string, len(Models))
+	for i, m := range Models {
+		out[i] = m.Directory + " " + m.Version
+	}
+	return out
+}

@@ -22,8 +22,10 @@
 // one reaches no other: the claim side, the upstream, and the build link of
 // vm and container mode. Their addresses are fixed, and exported below.
 //
-// No case is known that no in-process configuration can carry: each case
-// runs at least once, where it applies, against one of Configurations.
+// A specification module's go test hands its suite to Suite, which runs it
+// against each of Configurations. No case is known that no in-process
+// configuration can carry: each case runs at least once, where it applies,
+// against one of them, and Suite fails a case that does not.
 package inprocess
 
 import (

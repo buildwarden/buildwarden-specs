@@ -120,7 +120,7 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 	if !tf.RunsOn(runtime.GOOS) {
 		return fmt.Errorf("%s declares os %s, and this host's is %s", *targetFile, strings.Join(tf.OS, ", "), runtime.GOOS)
 	}
-	r := runner.Runner{Spec: s.Directory, Version: l.Version, Harness: h, Models: models()}
+	r := runner.Runner{Spec: s.Directory, Version: l.Version, Harness: h, Models: conformance.ModelList()}
 	if !slices.ContainsFunc(cases, func(c runner.Case) bool { return c.Role == tf.Role }) {
 		return runner.Report{Spec: r.Spec, Version: r.Version, Harness: r.Harness, Models: r.Models,
 			Target: *targetFile, Role: tf.Role, Launcher: tf.Launcher}.Write(stdout)
@@ -139,16 +139,6 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 		return errCasesFailed
 	}
 	return nil
-}
-
-// models is the harness's table of the specification versions its models
-// were written from, as a report names them.
-func models() []string {
-	out := make([]string, len(conformance.Models))
-	for i, m := range conformance.Models {
-		out[i] = m.Directory + " " + m.Version
-	}
-	return out
 }
 
 func requirements(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writer) error {
