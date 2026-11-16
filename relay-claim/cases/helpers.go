@@ -239,7 +239,12 @@ func (r *relayRun) build(link map[string]string) *buildenv.Env {
 	if err != nil {
 		t.Fatalf("the build environment: %v", err)
 	}
-	t.Cleanup(func() { _ = env.Close() })
+	if r.d.Link != buildenv.Frames {
+		// On a frame link the build environment owns the harness's end of
+		// the link, which the instance's Stop closes, and so its stack
+		// with it; closing it here as well makes the sandbox's Stop fail.
+		t.Cleanup(func() { _ = env.Close() })
+	}
 	if err := env.Ready(ctx); err != nil {
 		t.Fatalf("the relay's build side: %v", err)
 	}
