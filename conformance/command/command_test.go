@@ -2,16 +2,67 @@ package command
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/buildwarden/buildwarden-specs/conformance"
+	"github.com/buildwarden/buildwarden-specs/conformance/attach"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
 )
+
+// TestMain runs the test binary as a collector when the environment says
+// so: it prints its one argument and exits.
+func TestMain(m *testing.M) {
+	if os.Getenv("BW_COMMAND_HELPER") == "" {
+		os.Exit(m.Run())
+	}
+	fmt.Println(os.Args[len(os.Args)-1])
+	os.Exit(0)
+}
+
+const relayHost = `role = "relay"
+os = ["linux", "darwin", "windows"]
+launcher = "exec"
+[exec]
+argv = ["relay", "-claim-addr", "{claim}"]
+[relay]
+mode = "host"
+link = "frames"
+build_link = { prefix = "192.0.2.0/30", relay = "192.0.2.1", guest = "192.0.2.2" }
+`
+
+// collectorText is a collector target that runs the test binary, which
+// prints say.
+func collectorText(t *testing.T, say string) string {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return `role = "collector"
+os = ["linux", "darwin", "windows"]
+launcher = "exec"
+[exec]
+argv = ['` + exe + `', "{claim}", "{out}", ["{script}"], ["{context}"], ` + say + `]
+env = { BW_COMMAND_HELPER = "1" }
+[collector]
+attachment = "claims"
+forms = { no_script = true, no_context = true }
+`
+}
+
+func otherOS() string {
+	if runtime.GOOS == "plan9" || runtime.GOOS == "linux" {
+		return "windows"
+	}
+	return "linux"
+}
 
 func testSpec(doc, list string) spec.Spec {
 	return spec.Spec{
@@ -33,17 +84,40 @@ func TestSubcommands(t *testing.T) {
 	}
 	threeReqs := testSpec("**CLAIM-1.** a\n\n**CLAIM-2.** b\n\n**CLAIM-3.** c\n", "CLAIM-2 a person reads it\n")
 	dir := t.TempDir()
-	relayTarget := filepath.Join(dir, "relay-host.toml")
-	if err := os.WriteFile(relayTarget, []byte("role = \"relay\"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	write := func(name, text string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
 	}
-	badTarget := filepath.Join(dir, "bad.toml")
-	if err := os.WriteFile(badTarget, []byte("role = \"driver\"\n"), 0o600); err != nil {
-		t.Fatal(err)
+	relayTarget := write("relay-host.toml", relayHost)
+	collectorTarget := write("collector.toml", collectorText(t, `"pass"`))
+	failingTarget := write("failing.toml", collectorText(t, `"fail"`))
+	elsewhere := write("elsewhere.toml", strings.Replace(collectorText(t, `"pass"`), `os = ["linux", "darwin", "windows"]`, `os = ["`+otherOS()+`"]`, 1))
+	badTarget := write("bad.toml", "role = \"driver\"\n")
+	run := func(t *runner.T) {
+		in := t.Instance(attach.Params{Claim: "127.0.0.1:9", Out: "out", Capture: "none"})
+		for in.Exit() == "" {
+			if t.Context().Err() != nil {
+				t.Fatalf("the collector did not exit")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !strings.Contains(string(in.Log()), "pass") {
+			t.Errorf("the collector said: %s", in.Log())
+		}
 	}
 	cited := []runner.Case{
-		{Name: "claim-ok", Cites: []string{"CLAIM-1"}},
-		{Name: "claim-again", Cites: []string{"CLAIM-1"}},
+		{Name: "claim-ok", Cites: []string{"CLAIM-1"}, Role: "collector", Run: run},
+		{Name: "claim-again", Cites: []string{"CLAIM-1"}, Role: "collector", Run: run},
+	}
+	relayCases := []runner.Case{{Name: "relay-ok", Cites: []string{"CLAIM-1"}, Role: "relay", Run: run}}
+	header := func(target, role string) string {
+		return "relay-claim v0.4.0, conformance " + harness + ", against " + target + " (" + role + ", exec)\nmodels written from: none yet\n"
+	}
+	line := func(result, name string) string {
+		return result + "\trelay-claim v0.4.0\tconformance " + harness + "\t" + name + "\tCLAIM-1\n"
 	}
 	tests := []struct {
 		name       string
@@ -66,7 +140,13 @@ func TestSubcommands(t *testing.T) {
 		{name: "run with an unknown flag", s: threeReqs, args: []string{"run", "-x"}, wantStatus: ExitUsage, wantErr: "flag provided but not defined: -x"},
 		{
 			name: "run with no cases", s: threeReqs, args: []string{"run", "-target", relayTarget}, wantStatus: ExitOK,
-			wantOut: "relay-claim v0.4.0: the suite has no cases yet; nothing was run against " + relayTarget + " (role relay)\n",
+			wantOut: header(relayTarget, "relay") + "the suite has no cases for a relay target; nothing was run\n" +
+				"relay-claim v0.4.0, conformance " + harness + ", against " + relayTarget + ": 0 passed, 0 failed, 0 not applicable\n",
+		},
+		{
+			name: "run with no cases for the target's role", s: threeReqs, cases: cited, args: []string{"run", "-target", relayTarget}, wantStatus: ExitOK,
+			wantOut: header(relayTarget, "relay") + "the suite has no cases for a relay target; nothing was run\n" +
+				"relay-claim v0.4.0, conformance " + harness + ", against " + relayTarget + ": 0 passed, 0 failed, 0 not applicable\n",
 		},
 		{
 			name: "run against a bad target file", s: threeReqs, args: []string{"run", "-target", badTarget}, wantStatus: ExitFail,
@@ -77,8 +157,26 @@ func TestSubcommands(t *testing.T) {
 			wantErr: "absent.toml",
 		},
 		{
-			name: "run with cases", s: threeReqs, cases: cited, args: []string{"run", "-target", relayTarget}, wantStatus: ExitFail,
-			wantErr: "relay-claim v0.4.0 has 2 cases, and this harness cannot run cases yet",
+			name: "run with cases", s: threeReqs, cases: cited, args: []string{"run", "-target", collectorTarget}, wantStatus: ExitOK,
+			wantOut: header(collectorTarget, "collector") + line("pass", "claim-ok") + line("pass", "claim-again") +
+				"relay-claim v0.4.0, conformance " + harness + ", against " + collectorTarget + ": 2 passed, 0 failed, 0 not applicable\n",
+		},
+		{
+			name: "run with a failing case", s: threeReqs, cases: cited[:1], args: []string{"run", "-target", failingTarget}, wantStatus: ExitFail,
+			wantOut: "\nrelay-claim v0.4.0, conformance " + harness + ", against " + failingTarget + ": 0 passed, 1 failed, 0 not applicable\n",
+		},
+		{
+			name: "run against a target for another host", s: threeReqs, cases: cited, args: []string{"run", "-target", elsewhere}, wantStatus: ExitFail,
+			wantErr: elsewhere + " declares os " + otherOS() + ", and this host's is " + runtime.GOOS,
+		},
+		{
+			name: "run against a launcher not built", s: threeReqs, cases: relayCases, args: []string{"run", "-target", relayTarget}, wantStatus: ExitFail,
+			wantErr: "the exec launcher runs a relay in the Linux sandbox, which is not built by this harness yet",
+		},
+		{
+			name: "run a suite the runner refuses", s: threeReqs, cases: []runner.Case{{Name: "x", Cites: []string{"CLAIM-1"}, Role: "driver", Run: run}},
+			args: []string{"run", "-target", collectorTarget}, wantStatus: ExitFail,
+			wantErr: `case "x": role "driver" is not one this harness knows`,
 		},
 		{
 			name: "requirements", s: threeReqs, cases: cited, args: []string{"requirements"}, wantStatus: ExitOK,
@@ -116,7 +214,11 @@ func TestSubcommands(t *testing.T) {
 			if status != tt.wantStatus {
 				t.Errorf("status %d, want %d (stderr %q)", status, tt.wantStatus, stderr.String())
 			}
-			if tt.wantOut != "" && stdout.String() != tt.wantOut {
+			if strings.HasPrefix(tt.wantOut, "\n") {
+				if !strings.HasSuffix(stdout.String(), tt.wantOut) {
+					t.Errorf("stdout %q does not end %q", stdout.String(), tt.wantOut)
+				}
+			} else if tt.wantOut != "" && stdout.String() != tt.wantOut {
 				t.Errorf("stdout %q, want %q", stdout.String(), tt.wantOut)
 			}
 			if tt.wantOut == "" && stdout.Len() > 0 {

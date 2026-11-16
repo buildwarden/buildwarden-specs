@@ -4,14 +4,20 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/buildwarden/buildwarden-specs/conformance"
 	"github.com/buildwarden/buildwarden-specs/conformance/internal/coverage"
+	"github.com/buildwarden/buildwarden-specs/conformance/launch"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
 	"github.com/buildwarden/buildwarden-specs/conformance/target"
@@ -55,6 +61,8 @@ func Main(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Wri
 	switch {
 	case err == nil:
 		return ExitOK
+	case errors.Is(err, errCasesFailed):
+		return ExitFail
 	case errors.As(err, &ue):
 		fmt.Fprintf(stderr, "%s %s: %v\n", name, args[0], err)
 		return ExitUsage
@@ -81,6 +89,10 @@ func flags(fset *flag.FlagSet, args []string, stderr io.Writer) error {
 	return nil
 }
 
+// errCasesFailed is run's error when the report has a failure; the report
+// has already said which.
+var errCasesFailed = errors.New("cases failed")
+
 func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writer) error {
 	fset := flag.NewFlagSet("run", flag.ContinueOnError)
 	targetFile := fset.String("target", "", "the target file that describes the component under test")
@@ -94,15 +106,49 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 	if err != nil {
 		return err
 	}
+	if err := runner.Check(cases); err != nil {
+		return fmt.Errorf("the suite:\n%w", err)
+	}
+	h, err := conformance.Version()
+	if err != nil {
+		return err
+	}
 	tf, err := target.Read(*targetFile)
 	if err != nil {
 		return err
 	}
-	if len(cases) == 0 {
-		fmt.Fprintf(stdout, "%s %s: the suite has no cases yet; nothing was run against %s (role %s)\n", s.Directory, l.Version, *targetFile, tf.Role)
-		return nil
+	if !tf.RunsOn(runtime.GOOS) {
+		return fmt.Errorf("%s declares os %s, and this host's is %s", *targetFile, strings.Join(tf.OS, ", "), runtime.GOOS)
 	}
-	return fmt.Errorf("%s %s has %d cases, and this harness cannot run cases yet", s.Directory, l.Version, len(cases))
+	r := runner.Runner{Spec: s.Directory, Version: l.Version, Harness: h, Models: models()}
+	if !slices.ContainsFunc(cases, func(c runner.Case) bool { return c.Role == tf.Role }) {
+		return runner.Report{Spec: r.Spec, Version: r.Version, Harness: r.Harness, Models: r.Models,
+			Target: *targetFile, Role: tf.Role, Launcher: tf.Launcher}.Write(stdout)
+	}
+	a, err := launch.Attach(tf)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	rep := r.Run(ctx, *targetFile, a, cases)
+	if err := rep.Write(stdout); err != nil {
+		return err
+	}
+	if rep.Failed() {
+		return errCasesFailed
+	}
+	return nil
+}
+
+// models is the harness's table of the specification versions its models
+// were written from, as a report names them.
+func models() []string {
+	out := make([]string, len(conformance.Models))
+	for i, m := range conformance.Models {
+		out[i] = m.Directory + " " + m.Version
+	}
+	return out
 }
 
 func requirements(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writer) error {
@@ -116,6 +162,9 @@ func requirements(s spec.Spec, cases []runner.Case, args []string, stdout, stder
 		return err
 	}
 	if *check {
+		if err := runner.Check(cases); err != nil {
+			return fmt.Errorf("the suite:\n%w", err)
+		}
 		if err := coverage.Check(s, l, cases); err != nil {
 			return fmt.Errorf("the coverage check fails:\n%w", err)
 		}

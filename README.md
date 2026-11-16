@@ -73,19 +73,51 @@ These hold in every specification directory.
 - **Cases.** A suite is the package `cases/` of its directory's module, which
   exports its cases as `Cases`. Each case is a `runner.Case` of the harness and
   names, in its `Cites` field, the requirements it checks, which are its own
-  specification's only. `executor-initialize` has no suite yet: its cases are
-  for the item that changes the executor's `initialize`, and every one of its
-  requirements is on its list.
+  specification's only. It also names the role of the component it runs
+  against (`Role`, `relay` or `collector`); whether it ends the instance it
+  runs against (`Ends`), so that it is given a fresh one while the cases that
+  leave theirs usable share one; and, in `Applies`, what it needs the target
+  to declare, which is the only way a case is not applicable. A case reaches
+  the component and the networks around it through the attachment its
+  `runner.T` gives it, and never opens a socket of its own choosing.
+  `executor-initialize` has no suite yet: its cases are for the item that
+  changes the executor's `initialize`, and every one of its requirements is
+  on its list.
 - **The directory's package.** The Go package at the root of each directory
   embeds the document with its schemas and OpenAPI descriptions (`v1*`), the
   `CHANGELOG.md` and the list, so that a command built with `go install`
   carries them.
 - **The command.** `cmd/bw-conformance-<directory>` runs the suite.
-  `run -target <file>` runs it against the component a target file describes,
-  `requirements` lists each requirement with the cases that cite it or the
-  reason it has none, and `version` prints the specification's version, the
-  harness's, and the specification versions the harness's models were written
-  from.
+  `run -target <file>` runs it against the component a target file describes
+  (below): the cases for the target's role, each reported as `pass`, `fail` or
+  `n/a` (not applicable by what the target declares), with no skip and no
+  retry; when the suite has no case for that role it says so and does not
+  fail. Each case's line names its verdict, the specification and its
+  version, the harness's version, the case and the requirements it cites; a
+  failure is followed by what failed and the output of the instances it used,
+  and the report's last line counts the verdicts. `run` exits 1 when a case
+  failed or the target cannot be run on this host (a launcher this harness
+  does not build yet, an `os` that does not name the host), and 2 on a usage
+  error. `requirements` lists each requirement with the cases that cite it or
+  the reason it has none, and `version` prints the specification's version,
+  the harness's, and the specification versions the harness's models were
+  written from, which every report carries too.
+- **Target files.** A target file is TOML and describes one component under
+  test: its `role` (`relay` or `collector`), the host operating systems it
+  runs on (`os`), its `launcher` (`exec`, a program; `oci`, an image;
+  `external`, already running) with that launcher's table, and the attachment
+  points of its role in `[relay]` or `[collector]`. It names no specification
+  and no version. A key the format does not name is an error. Command lines
+  hold placeholders, `{claim}`, `{token}` and, for a collector, `{out}`,
+  `{context}`, `{script}` and `{capture}`, and an element of a command line
+  that is itself an array is an optional group, given only when the start
+  has a value for each placeholder in it. The `exec` program gets exactly the
+  `env` the file gives, and the variables of the harness's own environment
+  that `pass_env` names. The package comment of `conformance/target` gives
+  the format key by key. This harness release runs a collector that claims
+  by `exec` and a relay by `external`; a relay by `exec` (in the Linux
+  sandbox), an `oci` target and a collector that `listens` are errors that
+  say they are not built yet.
 - **Versions.** Each directory's `CHANGELOG.md` starts with the version its
   next release will be, `## vX.Y.Z`, newest first; a pull request that changes
   a directory adds that version. The command reads its version from there. A
