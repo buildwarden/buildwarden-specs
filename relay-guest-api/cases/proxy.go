@@ -6,10 +6,8 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -411,11 +409,15 @@ var unreachableUpstream = runner.Case{
 	},
 }
 
-// keptAlive: after an HTTP/1.1 request the connection is kept for the next
-// unless the request says close, and after an HTTP/1.0 request only when it
-// says keep-alive; the relay closes it otherwise.
+// keptAlive: after an HTTP/1.1 request the connection is kept for the next,
+// over HTTP and TLS, after a proxied request as after a reserved host's,
+// and after an HTTP/1.0 request when it says keep-alive. Each connection's
+// last request says Connection: close, or is HTTP/1.0 without keep-alive,
+// and so does its response; what a relay does after such a response is not
+// defined by GUEST-47, so the case checks nothing after it and closes the
+// connection itself.
 var keptAlive = runner.Case{
-	Name:  "a connection is kept after an HTTP/1.1 request, and after HTTP/1.0 only with keep-alive, and closed when the request says close",
+	Name:  "a connection is kept after an HTTP/1.1 request, and after an HTTP/1.0 request that says keep-alive",
 	Cites: []string{"GUEST-47"},
 	Role:  "relay",
 	Ends:  true,
@@ -427,17 +429,14 @@ var keptAlive = runner.Case{
 		kept10 := "GET /heartbeat HTTP/1.0\r\nHost: artifacts\r\nConnection: keep-alive\r\n\r\n"
 		close11 := request(http.MethodGet, "/heartbeat", "artifacts", nil)
 		for _, c := range []struct {
-			what   string
-			port   uint16
-			sni    string
-			reqs   []string
-			closes bool
+			what string
+			port uint16
+			sni  string
+			reqs []string
 		}{
-			{"HTTP/1.1 on port 80", 80, "", []string{hb11, proxied11, hb11, close11}, true},
-			{"HTTP/1.1 on port 443", 443, originName, []string{hb11, proxied11, close11}, true},
-			{"HTTP/1.0 without keep-alive", 80, "", []string{hb10}, true},
-			{"HTTP/1.0 with keep-alive", 80, "", []string{kept10, kept10, hb10}, true},
-			{"a proxied HTTP/1.1 request that says close", 80, "", []string{request(http.MethodGet, "/closed", originName, nil)}, true},
+			{"HTTP/1.1 on port 80", 80, "", []string{hb11, proxied11, hb11, close11}},
+			{"HTTP/1.1 on port 443", 443, originName, []string{hb11, proxied11, close11}},
+			{"HTTP/1.0 with keep-alive", 80, "", []string{kept10, kept10, hb10}},
 		} {
 			conn := w.conn(c.port, c.sni)
 			br := bufio.NewReader(conn)
@@ -450,13 +449,6 @@ var keptAlive = runner.Case{
 				if rep.status != http.StatusOK {
 					t.Errorf("%s: request %d, %s, was answered %s", c.what, i+1, firstLine(req), rep)
 				}
-			}
-			_ = conn.SetReadDeadline(time.Now().Add(within))
-			var ne net.Error
-			if _, err := br.ReadByte(); err == nil {
-				t.Errorf("%s: the relay sent more after the response to the request that ends the connection", c.what)
-			} else if errors.As(err, &ne) && ne.Timeout() {
-				t.Errorf("%s: the relay kept the connection open %s after the request that ends it", c.what, within)
 			}
 			_ = conn.Close()
 		}
