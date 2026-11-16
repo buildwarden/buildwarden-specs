@@ -59,7 +59,9 @@ var eachOutput = runner.Case{
 // ledgerAnswered has the ledger request, open from the claim, answered 200
 // with an empty body once the relay ends its body at the completion; the
 // ledger is the session's, and read back it verifies under the session's key
-// with every record whole.
+// with every record whole. COLLOUT-34's other half, that the bytes of a
+// ledger request that ends early are kept, has no check: the harness's
+// relay session holds the ledger request and has no way to cut it.
 var ledgerAnswered = runner.Case{
 	Name:    "a collector answers the ledger request once its body has ended, and keeps the ledger",
 	Cites:   []string{"COLLOUT-19", "COLLOUT-34"},
@@ -249,7 +251,10 @@ func lastOn(t *runner.T, f func(*session)) {
 
 // capturesStored stores captures as payloads/<hash> with captures/<name>
 // referring to them, under the names COLLOUT-16 makes, and one payload for
-// content sent twice.
+// content sent twice under the same hash. The same content sent once more
+// with its hash in upper case is a payload of its own, payloads/<HASH>, as
+// sent; on a file system whose names ignore case the two are one file, and
+// the case then counts them as one.
 var capturesStored = runner.Case{
 	Name:    "a disk collector stores a capture at payloads/<hash>, captures/<name> referring to it, once for the same content",
 	Cites:   []string{"COLLOUT-15", "COLLOUT-16", "COLLOUT-33"},
@@ -271,11 +276,16 @@ var capturesStored = runner.Case{
 		for _, c := range sent {
 			s.wantEmpty("PUT /v1/captures/"+c.path, s.do(http.MethodPut, "/v1/captures/"+c.path, h, c.body, captureTrailer(c.body)), http.StatusOK)
 		}
+		upper := strings.ToUpper(hashOf(one))
+		s.wantEmpty("PUT /v1/captures/upper with its hash in upper case", s.do(http.MethodPut, "/v1/captures/upper", h, one, http.Header{"Warden-Hash": {upper}}), http.StatusOK)
 		dir := s.readBack()
-		for _, b := range [][]byte{one, two} {
-			got, ok := file(dir, "payloads/"+hashOf(b))
-			if !ok || !bytes.Equal(got, b) {
-				t.Errorf("payloads/%s holds %q (present %v), want %q", hashOf(b), got, ok, b)
+		for _, hb := range []struct {
+			hash string
+			body []byte
+		}{{hashOf(one), one}, {hashOf(two), two}, {upper, one}} {
+			got, ok := file(dir, "payloads/"+hb.hash)
+			if !ok || !bytes.Equal(got, hb.body) {
+				t.Errorf("payloads/%s holds %q (present %v), want %q", hb.hash, got, ok, hb.body)
 			}
 		}
 		var payloads []string
@@ -284,13 +294,29 @@ var capturesStored = runner.Case{
 				payloads = append(payloads, f)
 			}
 		}
-		if len(payloads) != 2 {
-			t.Errorf("payloads/ holds %s, want one payload for each of the two contents", listed(payloads))
+		want := 3
+		if sameFile(filepath.Join(dir, "payloads", hashOf(one)), filepath.Join(dir, "payloads", upper)) {
+			want = 2
+		}
+		if len(payloads) != want {
+			t.Errorf("payloads/ holds %s, want %d: one for each content and each hash sent, the hash in upper case counting as another", listed(payloads), want)
 		}
 		for _, c := range sent {
 			referTo(t, dir, c.name, hashOf(c.body), c.body)
 		}
+		referTo(t, dir, "upper", upper, one)
 	},
+}
+
+// sameFile says that a and b are one file, as they are on a file system
+// whose names ignore case when they differ only in case.
+func sameFile(a, b string) bool {
+	fa, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	fb, err := os.Stat(b)
+	return err == nil && os.SameFile(fa, fb)
 }
 
 // referTo checks that captures/<name> of dir refers to payloads/<hash>: a
