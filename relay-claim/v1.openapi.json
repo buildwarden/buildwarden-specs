@@ -5,7 +5,7 @@
     "title": "relay-claim",
     "version": "v1",
     "summary": "How a claimant claims a relay: the tunnel, the claim and its reply.",
-    "description": "The claim endpoint of a relay, as a conforming claimant uses it. The requirements of relay-claim/v1.md are normative and this file describes only what they state; what it cannot say (the HTTP/2 that follows the tunnel's upgrade, one claim and one tunnel for a relay's life, the ordering at the claim, the differences by mode, and the known divergences) is in that document alone.",
+    "description": "The claim endpoint of a relay, as a conforming claimant uses it. The requirements of relay-claim/v1.md are normative and this file describes only what they state; what it cannot say (the 405 for any other method and what a relay answers on any other path, the HTTP/2 that follows the tunnel's upgrade, one claim and one tunnel for a relay's life, the ordering at the claim, the differences by mode, and the known divergences) is in that document alone.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -79,11 +79,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "405": {
-            "$ref": "#/components/responses/MethodNotAllowed"
-          },
           "409": {
-            "description": "A tunnel is open, a claim is being processed, or a claim has succeeded. The body is `tunnel already open`.",
+            "description": "The relay has accepted a tunnel before, whether or not that tunnel is still open; or a claim is being processed, or one has succeeded. The body is `tunnel already open`.",
             "x-requirements": ["CLAIM-15", "CLAIM-51"],
             "content": {
               "text/plain": {
@@ -110,7 +107,7 @@
         },
         "responses": {
           "200": {
-            "description": "The claim is accepted and the relay has started (CLAIM-44).",
+            "description": "The claim is accepted and the relay has started (CLAIM-44). The relay need not have had the collector's reply to PUT /v1/ledger (CLAIM-23).",
             "x-requirements": ["CLAIM-33", "CLAIM-44"],
             "content": {
               "application/json": {
@@ -133,11 +130,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "405": {
-            "$ref": "#/components/responses/MethodNotAllowed"
-          },
           "409": {
-            "description": "Another claim is being processed, or one has succeeded. The body is `already claimed`.",
+            "description": "Another claim is being processed, or one has succeeded. The body is `already claimed`. After a 200 the relay may instead close the connection with no reply (CLAIM-46).",
             "x-requirements": ["CLAIM-46", "CLAIM-51"],
             "content": {
               "text/plain": {
@@ -146,8 +140,8 @@
             }
           },
           "500": {
-            "description": "The relay accepted the claim and could not start with it; it is spent.",
-            "x-requirements": ["CLAIM-23", "CLAIM-28", "CLAIM-50", "CLAIM-51"],
+            "description": "The relay accepted the claim and could not start with it; it is spent (CLAIM-50). Among the causes: an unusable environment, or a status other than 200 to PUT /v1/environment; a collector_url the relay cannot request, or a collector it cannot reach; a tunnel that has closed. A refusal of PUT /v1/ledger need not be one (CLAIM-23).",
+            "x-requirements": ["CLAIM-22", "CLAIM-23", "CLAIM-28", "CLAIM-50", "CLAIM-51"],
             "content": {
               "text/plain": {
                 "schema": {
@@ -166,7 +160,7 @@
       "claimToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "The claim token, when the relay was started with one (CLAIM-5, CLAIM-8). A relay started without one takes any request (CLAIM-9)."
+        "description": "The claim token, when the relay was started with one (CLAIM-5, CLAIM-8). It is sent as `Authorization: Bearer <token>`, the scheme spelled exactly `Bearer`; a relay need accept no other spelling (CLAIM-8). A relay started without one takes any request (CLAIM-9)."
       }
     },
     "responses": {
@@ -176,15 +170,6 @@
         "content": {
           "text/plain": {
             "schema": {"type": "string", "pattern": "^unauthorized\\n?$"}
-          }
-        }
-      },
-      "MethodNotAllowed": {
-        "description": "Any method but POST, decided before the token.",
-        "x-requirements": ["CLAIM-4", "CLAIM-51"],
-        "content": {
-          "text/plain": {
-            "schema": {"type": "string", "pattern": "^POST only\\n?$"}
           }
         }
       }
