@@ -24,6 +24,7 @@ var Cases = []runner.Case{
 	consoleStored,
 
 	outputMethods,
+	baseURL,
 	noTokenSent,
 	ledgerFirst,
 	capturesHashed,

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,6 +117,45 @@ type build struct {
 	claimedAt time.Time
 	ca        *x509.Certificate
 	env       *buildenv.Env
+	// base is the collector at a base URL that is not the tunnel's, when
+	// the session has one.
+	base *baseServed
+}
+
+// baseServed is the harness's collector served at a base URL off the
+// tunnel. It records the target of each request as the relay sent it, and
+// serves the collector those under the base URL's path, with that path
+// taken off; any other it answers 404.
+type baseServed struct {
+	prefix string
+	w      http.Handler
+
+	mu      sync.Mutex
+	targets []string
+}
+
+func (s *baseServed) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.targets = append(s.targets, r.Method+" "+r.RequestURI)
+	s.mu.Unlock()
+	rest, ok := strings.CutPrefix(r.URL.EscapedPath(), s.prefix)
+	if !ok || !strings.HasPrefix(rest, "/v1/") {
+		http.Error(rw, "not under the base URL's path "+s.prefix, http.StatusNotFound)
+		return
+	}
+	r2 := r.Clone(r.Context())
+	r2.URL.RawPath = rest
+	r2.URL.Path, _ = url.PathUnescape(rest)
+	r2.RequestURI = r2.URL.RequestURI()
+	s.w.ServeHTTP(rw, r2)
+}
+
+// Targets are the method and request target of each request the relay
+// sent to the base URL's host, in the order they came.
+func (s *baseServed) Targets() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.targets...)
 }
 
 // buildOpts are what a case changes in the session.
@@ -124,8 +165,12 @@ type buildOpts struct {
 	abortComplete bool
 	capture       string
 	edit          func(*claimant.Config)
-	// anyReply takes the claim's reply whatever it is, and starts no build
-	// environment.
+	// base, when set, is a collector_url that is not the tunnel's: the
+	// harness's collector is served at it by an origin of the harness's
+	// upstream, which the relay requests itself (relay-claim, CLAIM-23).
+	base string
+	// anyReply takes the claim's reply whatever it is, and starts the build
+	// environment only when it is 200.
 	anyReply bool
 }
 
@@ -140,9 +185,18 @@ func claimRelay(t *runner.T, o buildOpts) *build {
 	d := t.Declared()
 	upNet := t.Network(attach.Upstream)
 	addr := upNet.Address()
+	origins := []upstream.Origin{{Name: originName, Addr: addr}}
+	var baseURL *url.URL
+	if o.base != "" {
+		var err error
+		if baseURL, err = url.Parse(o.base); err != nil {
+			t.Fatalf("the base URL %q: %v", o.base, err)
+		}
+		origins = append(origins, upstream.Origin{Name: baseURL.Hostname(), Addr: addr})
+	}
 	up, err := upstream.Start(ctx, upNet, upstream.World{
 		Resolvers: []netip.Addr{addr},
-		Origins:   []upstream.Origin{{Name: originName, Addr: addr}},
+		Origins:   origins,
 	})
 	if err != nil {
 		t.Fatalf("the harness's upstream: %v", err)
@@ -163,7 +217,19 @@ func claimRelay(t *runner.T, o buildOpts) *build {
 		o.edit(&b.cfg)
 	}
 	cl := claimant.Claimant{Net: t.Network(attach.Claim), Endpoint: in.Claim()}
-	tun, rep, err := cl.Session(ctx, b.w, b.cfg)
+	var tun *claimant.Tunnel
+	var rep *claimant.Reply
+	if baseURL != nil {
+		// The collector at the base URL: an origin of the upstream that
+		// records each request's target as it came, and hands the collector
+		// the request with the base URL's path taken off.
+		b.base = &baseServed{prefix: strings.TrimSuffix(baseURL.Path, "/"), w: b.w}
+		up.Origins.Handle(baseURL.Hostname(), b.base)
+		b.cfg.CollectorURL = o.base
+		rep, err = cl.Claim(ctx, b.cfg)
+	} else {
+		tun, rep, err = cl.Session(ctx, b.w, b.cfg)
+	}
 	b.claimedAt = time.Now()
 	if tun != nil {
 		t.Cleanup(func() { _ = tun.Close() })
@@ -172,7 +238,7 @@ func claimRelay(t *runner.T, o buildOpts) *build {
 		t.Fatalf("the tunnel and the claim: %v", err)
 	}
 	b.rep = rep
-	if o.anyReply {
+	if o.anyReply && rep.Status != http.StatusOK {
 		return b
 	}
 	if rep.Status != http.StatusOK {

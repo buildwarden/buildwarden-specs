@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/claimant"
@@ -11,21 +12,35 @@ import (
 	"github.com/buildwarden/buildwarden-specs/conformance/ledger"
 	"github.com/buildwarden/buildwarden-specs/conformance/relay"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
+	"github.com/buildwarden/buildwarden-specs/conformance/upstream"
 )
 
 // The cases that test a relay as the client of the outputs. Each claims a
 // relay of its own, so each ends the instance it runs against.
 
-// aBuild is a build that sends each kind of output: an artifact, a request
-// the relay proxies (which the capture mode "all" captures), and a piece of
-// the console; then it exits. It returns the bytes the build sent of each.
+// oddPath is the path of a request the build has the relay proxy, as the
+// build sends it, and oddDecoded the same path percent-decoded. Its bytes
+// " " and "%" are outside every set a path may carry unencoded, so that a
+// relay that names a capture after the request's path, as the Go relay
+// does, has a name to percent-encode (COLLOUT-12).
+const (
+	oddPath    = "/a%20b~c%25d"
+	oddDecoded = "/a b~c%d"
+)
+
+// aBuild is a build that sends each kind of output: an artifact, two
+// requests the relay proxies (which the capture mode "all" captures), one of
+// them at oddPath, and a piece of the console; then it exits. It returns the
+// bytes the build sent of each.
 func aBuild(b *build) (artifact, console []byte) {
 	artifact = []byte("an artifact the build made\n")
 	if rep := b.do(http.MethodPost, "http://artifacts/out/report.txt", artifact); rep.status != http.StatusOK {
 		b.t.Errorf("the build's POST http://artifacts/out/report.txt was answered %d %q, want 200", rep.status, rep.body)
 	}
-	if rep := b.do(http.MethodGet, "http://"+originName+"/page", nil); rep.status != http.StatusOK {
-		b.t.Errorf("the build's GET http://%s/page was answered %d %q, want 200", originName, rep.status, rep.body)
+	for _, p := range []string{"/page", oddPath} {
+		if rep := b.do(http.MethodGet, "http://"+originName+p, nil); rep.status != http.StatusOK {
+			b.t.Errorf("the build's GET http://%s%s was answered %d %q, want 200", originName, p, rep.status, rep.body)
+		}
 	}
 	console = []byte("the build's console\n")
 	if rep := b.do(http.MethodPost, b.control("/v1/output"), console); rep.status != http.StatusOK {
@@ -40,11 +55,17 @@ func withToken() buildOpts {
 	return buildOpts{form: collector.Form{Token: collectorToken}, capture: relay.CaptureAll}
 }
 
-// outputMethods: each output is sent with the method its endpoint names, at
-// the base URL's path, with the session's token on every request.
+// outputMethods: each output is sent with the method its endpoint names,
+// with the session's token on every request, at a path that is clean and
+// percent-encoded. A capture's name is the relay's to choose, so the case
+// can see the encoding only of a relay whose names carry bytes that need
+// it: the response at oddPath must arrive as a capture, which it does not
+// from a relay that puts the "%" of its path in a name unencoded (the
+// request cannot be made, or names another capture), and every path must
+// be encoded.
 var outputMethods = runner.Case{
-	Name:  "a relay sends each output with its method, at the claim's base URL, with the token",
-	Cites: []string{"COLLOUT-4", "COLLOUT-9", "COLLOUT-12", "COLLOUT-22"},
+	Name:  "a relay sends each output with its method, at a clean and percent-encoded path, with the token",
+	Cites: []string{"COLLOUT-9", "COLLOUT-12", "COLLOUT-22"},
 	Role:  "relay",
 	Ends:  true,
 	Run: func(t *runner.T) {
@@ -84,6 +105,42 @@ var outputMethods = runner.Case{
 		}
 		if got := b.c.Output(); !bytes.Equal(got, console) {
 			t.Errorf("the collector stored the console as %q, want %q", got, console)
+		}
+		odd := upstream.Body(originName, oddDecoded)
+		if !slices.ContainsFunc(b.c.Captures(), func(c collector.Capture) bool { return bytes.Equal(c.Body, odd) }) {
+			t.Errorf("the collector stored no capture of the response to the build's GET http://%s%s, in capture mode all; a capture named after that path must be sent with the name percent-encoded. It received:\n%s", originName, oddPath, b.requests())
+		}
+	},
+}
+
+// baseURL: with a collector_url that has a path and a trailing "/", every
+// request goes to that path with the trailing "/" removed and the
+// protocol's path appended. The collector is served off the tunnel, at an
+// origin of the upstream, as the relay requests it itself.
+var baseURL = runner.Case{
+	Name:  "a relay sends every request under the path of a base URL, with its trailing / removed",
+	Cites: []string{"COLLOUT-4"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		o := withToken()
+		o.base = "http://collector.example/base/"
+		b := claimRelay(t, o)
+		aBuild(b)
+		targets := b.base.Targets()
+		if len(targets) == 0 {
+			t.Fatalf("the relay sent no request to the base URL %s", o.base)
+		}
+		for _, tg := range targets {
+			_, target, _ := strings.Cut(tg, " ")
+			if !strings.HasPrefix(target, "/base/v1/") {
+				t.Errorf("%s is not the base URL's path /base with the protocol's path appended", tg)
+			}
+		}
+		for _, p := range []string{"/v1/ledger", "/v1/output", "/v1/complete"} {
+			if !slices.ContainsFunc(b.c.Requests(), func(r collector.Request) bool { return r.Path == p }) {
+				t.Errorf("the collector at the base URL received no request to /base%s; the relay sent:\n  %s", p, strings.Join(targets, "\n  "))
+			}
 		}
 	},
 }
@@ -131,20 +188,36 @@ var noTokenSent = runner.Case{
 	},
 }
 
-// ledgerFirst: the ledger request is the session's first, and its only
-// one; it ends, and is answered, before the completion is sent, as is every
-// output of the build's requests.
+// isOutput says that a path is one of the outputs': the ledger, an artifact,
+// a capture, the environment or the console. A signal is not one.
+func isOutput(p string) bool {
+	return p == "/v1/ledger" || p == "/v1/output" || p == "/v1/environment" ||
+		strings.HasPrefix(p, "/v1/artifacts/") || strings.HasPrefix(p, "/v1/captures/")
+}
+
+// ledgerFirst: the ledger request is opened before any other output of the
+// session (a signal may come before it), and is its only one; it ends, and
+// is answered, before the completion is sent, as is every output of the
+// build's requests.
 var ledgerFirst = runner.Case{
-	Name:  "a relay opens the ledger request first, sends one, and has it and every output answered before the completion",
+	Name:  "a relay opens the ledger request before any other output, sends one, and has it and every output answered before the completion",
 	Cites: []string{"COLLOUT-26", "COLLOUT-29"},
 	Role:  "relay",
 	Ends:  true,
 	Run: func(t *runner.T) {
-		b := claimRelay(t, withToken())
+		o := withToken()
+		o.edit = environmentClaim(200)
+		b := claimRelay(t, o)
 		aBuild(b)
 		reqs := b.c.Requests()
-		if len(reqs) == 0 || reqs[0].Method != http.MethodPut || reqs[0].Path != "/v1/ledger" {
-			t.Errorf("the session's first request was not PUT /v1/ledger; the collector received:\n%s", b.requests())
+		led, ok := b.first(http.MethodPut, "/v1/ledger")
+		if !ok {
+			t.Fatalf("the collector received no PUT /v1/ledger:\n%s", b.requests())
+		}
+		for _, r := range reqs {
+			if isOutput(r.Path) && r.Path != "/v1/ledger" && r.Begin < led.Begin {
+				t.Errorf("%s %s (event %d) began before PUT /v1/ledger (event %d):\n%s", r.Method, r.Path, r.Begin, led.Begin, b.requests())
+			}
 		}
 		if n := b.count(http.MethodPut, "/v1/ledger"); n != 1 {
 			t.Errorf("the session sent %d ledger requests, want 1", n)
@@ -154,9 +227,7 @@ var ledgerFirst = runner.Case{
 			t.Fatalf("the collector received no completion:\n%s", b.requests())
 		}
 		for _, r := range reqs {
-			output := r.Path == "/v1/ledger" || r.Path == "/v1/output" || r.Path == "/v1/environment" ||
-				strings.HasPrefix(r.Path, "/v1/artifacts/") || strings.HasPrefix(r.Path, "/v1/captures/")
-			if output && r.End > comp.Begin {
+			if isOutput(r.Path) && r.End > comp.Begin {
 				t.Errorf("%s %s (events %d to %d) was not answered before the completion began (event %d):\n%s", r.Method, r.Path, r.Begin, r.End, comp.Begin, b.requests())
 			}
 		}
@@ -266,6 +337,12 @@ var environmentTooLarge = runner.Case{
 		o.edit = environmentClaim(1<<20 + 1)
 		o.anyReply = true
 		b := claimRelay(t, o)
+		if b.rep.Status == http.StatusOK {
+			// A relay that took the claim may send the payload at any
+			// point of the session; it has sent every output once the
+			// collector has the completion.
+			b.exit(0)
+		}
 		for _, r := range b.c.Requests() {
 			// The collector answers 413 to a payload over
 			// collector.EnvironmentLimit, 1 MiB, and only to one.
