@@ -40,4 +40,7 @@ var Models = []Model{
 	{Directory: "collector-outputs", Version: "v0.1.0"},
 	{Directory: "collector-inputs", Version: "v0.1.0"},
 	{Directory: "bootstrap-config", Version: "v0.1.0"},
+	// The build environment and its address lease (packages buildenv and
+	// dhcp).
+	{Directory: "relay-guest-api", Version: "v0.1.0"},
 }
