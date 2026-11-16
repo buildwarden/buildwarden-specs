@@ -376,8 +376,8 @@ var readyOnce = runner.Case{
 		if !ok {
 			t.Fatalf("the relay had sent no POST /v1/ready when it answered the claim; the collector received:\n%s", b.requests())
 		}
-		if !ready.BeganAt.Before(b.claimedAt) {
-			t.Errorf("POST /v1/ready arrived at %s, after the claim's reply at %s", ready.BeganAt, b.claimedAt)
+		if ready.Begin > b.claimed {
+			t.Errorf("POST /v1/ready arrived at event %d, after the claim's reply at event %d", ready.Begin, b.claimed)
 		}
 		if len(ready.Body) != 0 {
 			t.Errorf("POST /v1/ready had the body %q, want none", ready.Body)

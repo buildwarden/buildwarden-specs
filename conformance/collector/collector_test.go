@@ -718,3 +718,18 @@ func TestRefusalAfterBody(t *testing.T) {
 	}
 	c.expect("POST", "/v1/output", strings.NewReader("on\n"), http.StatusOK, "*")
 }
+
+// TestMark: a mark taken after a request was answered is above its End, and
+// below the Begin of a request that arrives after it.
+func TestMark(t *testing.T) {
+	t.Parallel()
+	coll := New(Form{ServesAfterCompletion: true}, nil)
+	h := httpHandlerClient{coll}
+	h.serve("GET", "/v1/status", "")
+	m := coll.Mark()
+	h.serve("GET", "/v1/status", "")
+	reqs := coll.Requests()
+	if len(reqs) != 2 || reqs[0].End >= m || reqs[1].Begin <= m {
+		t.Errorf("the mark %d among requests %+v", m, reqs)
+	}
+}

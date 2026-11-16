@@ -38,7 +38,7 @@ var guestMAC = net.HardwareAddr{0x02, 0, 0, 0, 0xb8, 0x0b}
 const collectorToken = "conformance-collector-token"
 
 // served is the harness's collector as the tunnel serves it, with what a
-// case adds in front of it: the arrival of the ledger's bytes, timed, and
+// case adds in front of it: the arrival of the ledger's bytes, marked, and
 // a completion that it records and then leaves unanswered.
 type served struct {
 	c *collector.Collector
@@ -51,9 +51,11 @@ type served struct {
 	marks []mark
 }
 
-// mark is a point of the ledger's arrival: by when bytes had arrived.
+// mark is a point of the ledger's arrival: by when bytes had arrived, as
+// the collector's event number (Collector.Mark), which orders it against the
+// collector's requests where a clock's readings may be equal.
 type mark struct {
-	at    time.Time
+	at    int
 	bytes int
 }
 
@@ -72,7 +74,7 @@ func (w *served) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 // arrived is when the ledger's first n bytes had all arrived, and whether
 // they had.
-func (w *served) arrived(n int) (time.Time, bool) {
+func (w *served) arrived(n int) (int, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	for _, m := range w.marks {
@@ -80,10 +82,10 @@ func (w *served) arrived(n int) (time.Time, bool) {
 			return m.at, true
 		}
 	}
-	return time.Time{}, false
+	return 0, false
 }
 
-// tap times the ledger's bytes as the collector reads them.
+// tap marks the ledger's bytes as the collector reads them.
 type tap struct {
 	rc io.ReadCloser
 	w  *served
@@ -95,7 +97,7 @@ func (t *tap) Read(p []byte) (int, error) {
 	if n > 0 {
 		t.n += n
 		t.w.mu.Lock()
-		t.w.marks = append(t.w.marks, mark{at: time.Now(), bytes: t.n})
+		t.w.marks = append(t.w.marks, mark{at: t.w.c.Mark(), bytes: t.n})
 		t.w.mu.Unlock()
 	}
 	return n, err
@@ -113,10 +115,11 @@ type build struct {
 	up  *upstream.Upstream
 	cfg claimant.Config
 	rep *claimant.Reply
-	// claimedAt is when the claim's reply had arrived.
-	claimedAt time.Time
-	ca        *x509.Certificate
-	env       *buildenv.Env
+	// claimed is when the claim's reply had arrived, as the collector's
+	// event number (Collector.Mark).
+	claimed int
+	ca      *x509.Certificate
+	env     *buildenv.Env
 	// base is the collector at a base URL that is not the tunnel's, when
 	// the session has one.
 	base *baseServed
@@ -230,7 +233,7 @@ func claimRelay(t *runner.T, o buildOpts) *build {
 	} else {
 		tun, rep, err = cl.Session(ctx, b.w, b.cfg)
 	}
-	b.claimedAt = time.Now()
+	b.claimed = b.c.Mark()
 	if tun != nil {
 		t.Cleanup(func() { _ = tun.Close() })
 	}

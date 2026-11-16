@@ -319,8 +319,8 @@ var environmentFirst = runner.Case{
 		if !ok {
 			t.Fatalf("the arrival of the ledger's byte %d was not seen", rec.Offset)
 		}
-		if at.Before(env.EndedAt) {
-			t.Errorf("the ledger's environment record (at byte %d) arrived at %s, before the collector had answered PUT /v1/environment at %s", rec.Offset, at.Format("15:04:05.000000"), env.EndedAt.Format("15:04:05.000000"))
+		if env.End == 0 || at < env.End {
+			t.Errorf("the ledger's environment record (at byte %d) arrived at event %d, before the collector had answered PUT /v1/environment at event %d", rec.Offset, at, env.End)
 		}
 	},
 }

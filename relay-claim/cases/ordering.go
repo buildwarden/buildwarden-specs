@@ -37,7 +37,9 @@ var beforeTheReply = runner.Case{
 		r.tunnel(coll)
 		env := map[string]any{"payload": payload(`{"type":"conformance-test/v1"}`), "metadata": emptyMap}
 		rep := r.send(r.base().with(claim{"environment": env}))
-		replied := time.Now()
+		// The collector's event number for the 200's arrival orders it
+		// against the collector's requests, as a clock may not.
+		replied := coll.Mark()
 		accepted(t, "the claim", rep)
 		find := func(method, path string) (collector.Request, bool) {
 			for _, q := range coll.Requests() {
@@ -47,13 +49,13 @@ var beforeTheReply = runner.Case{
 			}
 			return collector.Request{}, false
 		}
-		if q, ok := find(http.MethodPut, "/v1/ledger"); !ok || !q.BeganAt.Before(replied) {
+		if q, ok := find(http.MethodPut, "/v1/ledger"); !ok || q.Begin > replied {
 			t.Errorf("the ledger stream, PUT /v1/ledger, had not reached the collector when the claim's 200 arrived (%v)", ok)
 		}
-		if q, ok := find(http.MethodPut, "/v1/environment"); !ok || q.Status != http.StatusOK || !q.EndedAt.Before(replied) {
+		if q, ok := find(http.MethodPut, "/v1/environment"); !ok || q.Status != http.StatusOK || q.End == 0 || q.End > replied {
 			t.Errorf("PUT /v1/environment had not been answered 200 when the claim's 200 arrived (%v, %d)", ok, q.Status)
 		}
-		if q, ok := find(http.MethodPost, "/v1/ready"); !ok || q.EndedAt.IsZero() || !q.EndedAt.Before(replied) {
+		if q, ok := find(http.MethodPost, "/v1/ready"); !ok || q.End == 0 || q.End > replied {
 			t.Errorf("POST /v1/ready had not been answered when the claim's 200 arrived (%v)", ok)
 		}
 	},

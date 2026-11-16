@@ -81,8 +81,8 @@ type Form struct {
 // Request is one request the collector received, in the order of arrival.
 type Request struct {
 	// Seq numbers the collector's events: a request's arrival and its end
-	// each take the next number, so that one request ended before another
-	// began when its End is below the other's Begin.
+	// each take the next number, as does each Mark, so that one request
+	// ended before another began when its End is below the other's Begin.
 	Begin, End int
 	// BeganAt and EndedAt are when it arrived and when its reply was
 	// written, or when it was reset.
@@ -200,6 +200,18 @@ func (c *Collector) Requests() []Request {
 		out = append(out, *r)
 	}
 	return out
+}
+
+// Mark takes the next number of the collector's events (Request's Begin and
+// End) for an event the caller saw: a request that ended before it has an
+// End below the mark, and one that began after it a Begin above. It orders
+// what the caller saw against the collector's requests where two readings of
+// a clock would not, on a clock as coarse as Windows' is.
+func (c *Collector) Mark() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seq++
+	return c.seq
 }
 
 // Ledger is the ledger's bytes received so far, the number of ledger

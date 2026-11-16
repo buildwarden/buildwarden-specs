@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/attach"
 	"github.com/buildwarden/buildwarden-specs/conformance/collector"
@@ -296,15 +295,17 @@ func environmentLanded() []runner.Case {
 					env["type"] = v.typ
 				}
 				rep := r.send(r.base().with(claim{"environment": env}))
-				replied := time.Now()
+				// The collector's event number for the 200's arrival orders it
+				// against the collector's requests, as a clock may not.
+				replied := coll.Mark()
 				accepted(t, "the claim", rep)
 				got, n := coll.Environment()
 				if n != 1 || string(got) != v.payload {
 					t.Errorf("the collector received %d environments, the last %q; want 1, %q", n, got, v.payload)
 				}
 				for _, q := range coll.Requests() {
-					if q.Method == http.MethodPut && q.Path == "/v1/environment" && (q.Status != http.StatusOK || !q.EndedAt.Before(replied)) {
-						t.Errorf("PUT /v1/environment was answered %d at %v, and the claim's 200 had arrived by %v", q.Status, q.EndedAt, replied)
+					if q.Method == http.MethodPut && q.Path == "/v1/environment" && (q.Status != http.StatusOK || q.End == 0 || q.End > replied) {
+						t.Errorf("PUT /v1/environment was answered %d at event %d, and the claim's 200 had arrived by event %d", q.Status, q.End, replied)
 					}
 				}
 			},
