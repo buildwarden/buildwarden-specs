@@ -61,6 +61,7 @@ var Cases = slices.Concat([]runner.Case{
 	beforeTheReply,
 	readyRefused,
 	afterTheClaim,
+	afterTheClaimOnOpen,
 	ledgerSigned,
 	// The claimant.
 	claimantRequests,

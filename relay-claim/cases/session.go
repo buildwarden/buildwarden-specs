@@ -14,12 +14,30 @@ import (
 	"github.com/buildwarden/buildwarden-specs/conformance/upstream"
 )
 
+// collectorName is a name of the upstream collector's own.
+const collectorName = "collector.example"
+
 // The address at which collectorAtURL serves the harness's collector on
 // the upstream, and an address on the upstream at which nothing listens.
 var (
 	collectorAddr = netip.MustParseAddr("192.0.2.70")
 	nobodyAddr    = netip.MustParseAddr("192.0.2.71")
 )
+
+// upstreamCollector serves a harness collector on the upstream at
+// collectorAddr, port 80, which the claim's one resolver gives for name.
+func (r *relayRun) upstreamCollector(name string) *collector.Collector {
+	t := r.t
+	r.up.Resolvers[0].Set(name, collectorAddr)
+	coll := collector.New(collector.Form{}, nil)
+	l, err := t.Network(attach.Upstream).Listen(t.Context(), "tcp", netip.AddrPortFrom(collectorAddr, 80).String())
+	if err != nil {
+		t.Fatalf("the collector's listener: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() { _ = coll.Serve(l) }()
+	return coll
+}
 
 // collectorAtURL is a case for each of two collector_urls that are not the
 // tunnel, each written with a trailing slash: one for a name of its own,
@@ -34,7 +52,7 @@ func collectorAtURL() []runner.Case {
 		name   string
 		tunnel bool
 	}{
-		{"collector.example", false},
+		{collectorName, false},
 		{"collector.tunnel", true},
 	} {
 		url := "http://" + v.name + "/"
@@ -49,14 +67,7 @@ func collectorAtURL() []runner.Case {
 			Ends:  true,
 			Run: func(t *runner.T) {
 				r := startRelay(t, attach.Params{})
-				r.up.Resolvers[0].Set(v.name, collectorAddr)
-				coll := collector.New(collector.Form{}, nil)
-				l, err := t.Network(attach.Upstream).Listen(t.Context(), "tcp", netip.AddrPortFrom(collectorAddr, 80).String())
-				if err != nil {
-					t.Fatalf("the collector's listener: %v", err)
-				}
-				t.Cleanup(func() { _ = l.Close() })
-				go func() { _ = coll.Serve(l) }()
+				coll := r.upstreamCollector(v.name)
 				var tunneled *collector.Collector
 				if v.tunnel {
 					tunneled = collector.New(collector.Form{}, nil)

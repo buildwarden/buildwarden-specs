@@ -1,14 +1,21 @@
 package cases
 
 import (
+	"bufio"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/attach"
+	"github.com/buildwarden/buildwarden-specs/conformance/claimant"
 	"github.com/buildwarden/buildwarden-specs/conformance/collector"
 	"github.com/buildwarden/buildwarden-specs/conformance/ledger"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
@@ -88,6 +95,100 @@ var afterTheClaim = runner.Case{
 		defer cancel()
 		if _, err := r.cl.OpenTunnel(ctx, coll); err == nil {
 			t.Errorf("a tunnel was opened after the claim's 200")
+		}
+	},
+}
+
+// openConnection is a connection to the claim endpoint on which the first
+// line of a POST to path has been sent, and nothing more: the relay is
+// reading the request's headers. It is dialled before the claim's, so that a
+// relay that accepts its connections in order has accepted it by the time
+// it reads the claim. (A connection that has been answered once and is kept
+// alive would not do: an HTTP server takes it as idle while it waits for the
+// next request's headers, and closes it when it stops serving.)
+type openConnection struct {
+	conn net.Conn
+	rd   *bufio.Reader
+}
+
+func (r *relayRun) openConnection(path string) *openConnection {
+	t := r.t
+	conn, err := r.cl.Net.Dial(t.Context(), "tcp", r.cl.Endpoint.Address)
+	if err != nil {
+		t.Fatalf("a connection to the claim endpoint: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: relay\r\n", path)
+	return &openConnection{conn: conn, rd: bufio.NewReader(conn)}
+}
+
+// finish sends the rest of the request, its headers h and body, and returns
+// its reply, or nil when the relay closed the connection without one.
+func (o *openConnection) finish(t *runner.T, h http.Header, body []byte) *claimant.Reply {
+	_ = o.conn.SetDeadline(time.Now().Add(within))
+	h.Set("Content-Length", strconv.Itoa(len(body)))
+	if err := h.Write(o.conn); err != nil {
+		t.Logf("the rest of the request: %v", err)
+		return nil
+	}
+	_, _ = o.conn.Write(append([]byte("\r\n"), body...))
+	resp, err := http.ReadResponse(o.rd, nil)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("the relay neither answered nor closed the connection within %s", within)
+	}
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		return &claimant.Reply{Status: resp.StatusCode, Header: resp.Header}
+	}
+	b, _ := io.ReadAll(resp.Body)
+	return &claimant.Reply{Status: resp.StatusCode, Header: resp.Header, Body: b}
+}
+
+// afterTheClaimOnOpen claims a fresh relay, with no tunnel and a collector
+// on the upstream, while it is reading the headers of a tunnel request on
+// one connection and of a claim on another, each opened before the claim's
+// (CLAIM-46: a connection kept alive or idle). After the 200 each request is
+// finished: the relay must answer it 409, the
+// tunnel request "tunnel already open" (CLAIM-15) and the claim "already
+// claimed" (CLAIM-46), or close the connection with no reply, as the Go
+// relay may for the connections it was serving.
+var afterTheClaimOnOpen = runner.Case{
+	Name:  "after its 200 the relay accepts no tunnel and no claim on a connection it was reading",
+	Cites: []string{"CLAIM-15", "CLAIM-46"},
+	Role:  "relay",
+	Ends:  true,
+	Run: func(t *runner.T) {
+		r := startRelay(t, attach.Params{})
+		r.upstreamCollector(collectorName)
+		c := r.base().with(claim{"collector_url": "http://" + collectorName})
+		tun, cl := r.openConnection("/v1/tunnel"), r.openConnection("/v1/claim")
+		accepted(t, "the claim", r.send(c))
+		auth := func(h http.Header) http.Header {
+			if r.cl.Endpoint.Token != "" {
+				h.Set("Authorization", "Bearer "+r.cl.Endpoint.Token)
+			}
+			return h
+		}
+		for _, v := range []struct {
+			what, body string
+			o          *openConnection
+			h          http.Header
+			payload    []byte
+		}{
+			{"a tunnel request", "tunnel already open", tun, auth(http.Header{"Connection": {"Upgrade"}, "Upgrade": {"warden-tunnel"}}), nil},
+			{"a claim", "already claimed", cl, auth(http.Header{"Content-Type": {"application/json"}}), c.body()},
+		} {
+			rep := v.o.finish(t, v.h, v.payload)
+			switch {
+			case rep == nil:
+			case rep.Status == http.StatusSwitchingProtocols:
+				t.Errorf("%s on a connection open before the claim's 200 was answered 101 after it", v.what)
+			default:
+				refusal(t, v.what+" on a connection open before the claim's 200", rep, http.StatusConflict, v.body, true)
+			}
 		}
 	},
 }
