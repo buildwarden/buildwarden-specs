@@ -314,7 +314,7 @@
             ]
           },
           "400": {
-            "description": "The body is not JSON, or does not decode as the completion.",
+            "description": "The body is not JSON, is a JSON array, string, number or boolean, or has one of the three members with a value of another type that is not null; or, as the collector may, an exit_code with a fraction or an exponent or outside the signed 64-bit range.",
             "x-requirements": [
               "COLLIN-23"
             ]

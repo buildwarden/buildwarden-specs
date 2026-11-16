@@ -119,7 +119,7 @@
     "/v1/captures/{name}": {
       "put": {
         "summary": "Store a captured payload",
-        "description": "A payload the relay captured, sent chunked with the request trailer Warden-Hash, which follows the body and so is not a header this file can describe: the BLAKE2b-256 of the body as 64 hexadecimal digits (COLLOUT-15, COLLOUT-17, COLLOUT-18). The collector stores it under the name with every byte outside [A-Za-z0-9._-] replaced by _ (COLLOUT-16).",
+        "description": "A payload the relay captured, sent with no length in advance and with the request trailer Warden-Hash, declared in the Trailer header field; the trailer follows the body and so is not a header this file can describe: the BLAKE2b-256 of the body as 64 hexadecimal digits (COLLOUT-15, COLLOUT-17, COLLOUT-18). The collector stores it under the name with every byte outside [A-Za-z0-9._-] replaced by _ (COLLOUT-16).",
         "x-requirements": [
           "COLLOUT-15",
           "COLLOUT-16",
@@ -171,11 +171,21 @@
             "name": "name",
             "in": "path",
             "required": true,
-            "description": "The capture's name, as the relay made it; the relay percent-encodes it whole, a / among it (COLLOUT-16).",
+            "description": "The capture's name, as the relay made it (COLLOUT-16).",
             "schema": {
               "type": "string",
               "minLength": 1,
               "maxLength": 255
+            }
+          },
+          {
+            "name": "Trailer",
+            "in": "header",
+            "required": true,
+            "description": "Declares the trailer Warden-Hash, which the relay sends (COLLOUT-18) and a collector reads when it is declared (COLLOUT-15).",
+            "schema": {
+              "type": "string",
+              "const": "Warden-Hash"
             }
           }
         ]

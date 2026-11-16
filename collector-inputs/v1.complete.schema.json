@@ -2,12 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/buildwarden/buildwarden-specs/collector-inputs/v1.complete.schema.json",
   "title": "collector-inputs v1: the body of POST /v1/complete",
-  "description": "The build's result, as a relay sends it (COLLIN-23, COLLIN-32). A collector ignores a member it does not know.",
+  "description": "The build's result, as a relay sends it (COLLIN-23, COLLIN-32). A collector ignores a member whose name is none of the three in any case of its letters.",
   "type": "object",
   "properties": {
     "exit_code": {
-      "description": "The build's exit code: 0 is success.",
-      "type": "integer"
+      "description": "The build's exit code: 0 is success. A relay writes it with no fraction and no exponent (COLLIN-23).",
+      "type": "integer",
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807
     },
     "message": {
       "description": "Text for a person about the build's end; may be empty.",
