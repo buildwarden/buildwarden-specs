@@ -80,7 +80,8 @@ var routedByTarget = runner.Case{
 // before any activity, the first within 2 s of it, then at least every 2 s
 // while it is less than 4 s old, and none once it is 5 s old. The build's
 // last activity is put 0.5 s after a heartbeat arrived, so that a beat
-// every 2 s finds it 3.5 s old.
+// every 2 s finds it 3.5 s old. Last, once the heartbeats have stopped, a
+// proxied request is the only activity, and the same bounds hold for it.
 var heartbeatForwarded = runner.Case{
 	Name:  "the build's activity, a proxied request or /heartbeat, has the relay send heartbeats while it is less than 4 s old, and none before it or at 5 s",
 	Cites: []string{"GUEST-20"},
@@ -139,6 +140,25 @@ var heartbeatForwarded = runner.Case{
 		for _, h := range hs {
 			if d := h.BeganAt.Sub(last); d > 5*time.Second+slack {
 				t.Errorf("a heartbeat came %s after the build's last activity, want none once it is 5s old", d)
+			}
+		}
+		// Then a proxied request alone, once the heartbeats have stopped:
+		// in the first phase a /heartbeat follows the proxied request, and
+		// its beat would hide a relay that does not count the proxied one.
+		if n := len(hs); n > 0 && time.Since(hs[n-1].BeganAt) < 3*time.Second {
+			t.Fatalf("the relay still sent heartbeats 9 s after the build's last activity")
+		}
+		before := len(hs)
+		proxied := time.Now()
+		expect(t, "GET /alone for "+originName, w.get(originName, "/alone"), http.StatusOK, "", nil)
+		sleep(t, 9*time.Second)
+		after := beats()[before:]
+		if len(after) == 0 || after[0].BeganAt.Sub(proxied) > 2*time.Second+slack {
+			t.Errorf("no heartbeat came within 2s of a proxied request that was the build's only activity")
+		}
+		for _, h := range after {
+			if d := h.BeganAt.Sub(proxied); d > 5*time.Second+slack {
+				t.Errorf("a heartbeat came %s after a proxied request that was the build's last activity, want none once it is 5s old", d)
 			}
 		}
 	},
