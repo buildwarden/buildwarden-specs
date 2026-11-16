@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"runtime"
 	"slices"
@@ -19,6 +20,7 @@ import (
 	"github.com/buildwarden/buildwarden-specs/conformance/internal/coverage"
 	"github.com/buildwarden/buildwarden-specs/conformance/launch"
 	"github.com/buildwarden/buildwarden-specs/conformance/runner"
+	"github.com/buildwarden/buildwarden-specs/conformance/sandbox"
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
 	"github.com/buildwarden/buildwarden-specs/conformance/target"
 )
@@ -58,9 +60,12 @@ func Main(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Wri
 		return ExitUsage
 	}
 	var ue usageError
+	var es exitStatus
 	switch {
 	case err == nil:
 		return ExitOK
+	case errors.As(err, &es):
+		return int(es)
 	case errors.Is(err, errCasesFailed):
 		return ExitFail
 	case errors.As(err, &ue):
@@ -71,6 +76,13 @@ func Main(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Wri
 		return ExitFail
 	}
 }
+
+// exitStatus is run's error when the command re-ran itself in a user
+// namespace (sandbox.Reexec): the status the re-run one exited with, which has
+// said what it had to.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 type usageError struct{ msg string }
 
@@ -125,6 +137,9 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 		return runner.Report{Spec: r.Spec, Version: r.Version, Harness: r.Harness, Models: r.Models,
 			Target: *targetFile, Role: tf.Role, Launcher: tf.Launcher}.Write(stdout)
 	}
+	if c := sandbox.Reexec(tf, append([]string{"run"}, args...)); c != nil {
+		return reexec(c, stdout, stderr)
+	}
 	a, err := launch.Attach(tf)
 	if err != nil {
 		return err
@@ -137,6 +152,21 @@ func run(s spec.Spec, cases []runner.Case, args []string, stdout, stderr io.Writ
 	}
 	if rep.Failed() {
 		return errCasesFailed
+	}
+	return nil
+}
+
+// reexec runs c, this command again in a user namespace of its own, with
+// this one's output, and returns the status it exited with.
+func reexec(c *exec.Cmd, stdout, stderr io.Writer) error {
+	c.Stdout, c.Stderr = stdout, stderr
+	err := c.Run()
+	var ee *exec.ExitError
+	switch {
+	case errors.As(err, &ee):
+		return exitStatus(ee.ExitCode())
+	case err != nil:
+		return fmt.Errorf("%w: this process runs as uid %d, and re-running it in a user namespace of its own failed (%v)", sandbox.ErrPrivilege, os.Geteuid(), err)
 	}
 	return nil
 }

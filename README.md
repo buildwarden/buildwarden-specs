@@ -97,7 +97,8 @@ These hold in every specification directory.
   failure is followed by what failed and the output of the instances it used,
   and the report's last line counts the verdicts. `run` exits 1 when a case
   failed or the target cannot be run on this host (a launcher this harness
-  does not build yet, an `os` that does not name the host), and 2 on a usage
+  does not build yet, an `os` that does not name the host, a sandbox this
+  process may not build), and 2 on a usage
   error. `requirements` lists each requirement with the cases that cite it or
   the reason it has none, and `version` prints the specification's version,
   the harness's, and the specification versions the harness's models were
@@ -115,9 +116,32 @@ These hold in every specification directory.
   `env` the file gives, and the variables of the harness's own environment
   that `pass_env` names. The package comment of `conformance/target` gives
   the format key by key. This harness release runs a collector that claims
-  by `exec` and a relay by `external`; a relay by `exec` (in the Linux
-  sandbox), an `oci` target and a collector that `listens` are errors that
-  say they are not built yet.
+  by `exec`, a relay by `exec` or `oci` in the Linux sandbox (below), and a
+  relay by `external`; a collector by `oci` and a collector that `listens`
+  are errors that say they are not built yet.
+- **The sandbox.** `conformance/sandbox` is where the `exec` and `oci`
+  launchers start each instance of a relay, on Linux only: network
+  namespaces that are the relay's whole world, made by the harness over
+  rtnetlink with no program run but the relay the target file names and, for
+  `oci`, the container runtime it names. Every address of the documentation
+  ranges is the harness's, so a case starts its resolvers on port 53 and its
+  origins on 80 and 443 at any of them; the relay reaches them over a link of
+  its own, on whose address it serves its claim endpoint (`{claim}`). A
+  `frames` link is a datagram socket pair, the relay's end its file
+  descriptor 3; an `ip` link is a veth pair to a namespace of the build
+  environment's, and the relay's end is created before its upstream link, so
+  that a relay that takes its first address as its own takes its build
+  address. An `exec` relay runs in a mount namespace with the sandbox's
+  resolver configuration bound over `/etc/resolv.conf` and a sysfs of its own
+  network namespace on `/sys`; an `oci` relay is run with no network of the
+  runtime's (`--network none`), the file mounted in, and is given the same
+  links in its container's namespace. Every link and container is named after
+  the harness process and the instance and removed when the instance ends, so
+  two runs share a host. Building it needs root or, for `exec`, unprivileged
+  user namespaces, in which case the command re-runs itself in a user
+  namespace of its own; `oci` needs root. A sandbox that cannot be built is
+  an error that names what is missing, never a skip. The package comment
+  gives the address plan.
 - **The harness's roles.** A case drives the component under test through
   the harness's models of the roles around it, each a package of
   `conformance/`, written from the documents and sharing no code with the

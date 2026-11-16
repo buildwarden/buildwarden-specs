@@ -309,26 +309,15 @@ func TestExecCollectorNetwork(t *testing.T) {
 
 func TestNotBuilt(t *testing.T) {
 	tests := map[string]string{
-		"a relay by exec": `role = "relay"
-os = ["linux"]
-launcher = "exec"
-[exec]
-argv = ["relay", "-claim-addr", "{claim}"]
-[relay]
-mode = "host"
-link = "frames"
-build_link = { prefix = "192.0.2.0/30", relay = "192.0.2.1", guest = "192.0.2.2" }
-`,
-		"an oci relay": `role = "relay"
+		"an oci collector": `role = "collector"
 os = ["linux"]
 launcher = "oci"
 [oci]
 runtime = "docker"
 image = "i"
-[relay]
-mode = "container"
-link = "ip"
-address_by_launcher = true
+args = ["--relay", "{claim}", "--context", "{context}", "--script", "{script}"]
+[collector]
+attachment = "claims"
 `,
 		"a collector that listens": `role = "collector"
 os = ["linux"]

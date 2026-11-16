@@ -3,12 +3,14 @@
 // the launcher the file names.
 //
 // This harness builds the exec launcher for a collector that claims, which
-// runs as a process of this host, and the external launcher for a relay.
-// The exec launcher for a relay runs it in the Linux sandbox, and the oci
-// launcher runs an image; neither is built yet, and neither is a collector
-// that listens, which the format names so that it does not assume a
-// collector is its own claimant. A target that needs one of them is an
-// error that says so, never a skip.
+// runs as a process of this host; the exec and oci launchers for a relay,
+// which start each instance in the Linux sandbox (package sandbox), an exec
+// relay as a process and an oci relay as a container of the runtime the file
+// names; and the external launcher for a relay. A collector by oci and a
+// collector that listens are not built yet: the format names them so that it
+// does not assume a collector is started as a process or is its own
+// claimant. A target that needs one of them is an error that says so, never
+// a skip.
 package launch
 
 import (
@@ -48,10 +50,10 @@ var ErrNotBuilt = errors.New("not built by this harness yet")
 // Attach makes the attachment of the target f describes.
 func Attach(f target.File) (attach.Attachment, error) {
 	switch {
-	case f.Role == "relay" && f.Launcher == "exec":
-		return nil, fmt.Errorf("%s: the exec launcher runs a relay in the Linux sandbox, which is %w", f.Path, ErrNotBuilt)
+	case f.Role == "relay" && f.Launcher != "external":
+		return newSandboxRelay(f)
 	case f.Launcher == "oci":
-		return nil, fmt.Errorf("%s: the oci launcher is %w", f.Path, ErrNotBuilt)
+		return nil, fmt.Errorf("%s: the oci launcher for a collector is %w", f.Path, ErrNotBuilt)
 	case f.Role == "collector" && f.Collector.Attachment == "listens":
 		return nil, fmt.Errorf("%s: a collector that listens is named by the target-file format and %w", f.Path, ErrNotBuilt)
 	case f.Role == "collector":

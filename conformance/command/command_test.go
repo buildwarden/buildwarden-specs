@@ -96,6 +96,8 @@ func TestSubcommands(t *testing.T) {
 	failingTarget := write("failing.toml", collectorText(t, `"fail"`))
 	elsewhere := write("elsewhere.toml", strings.Replace(collectorText(t, `"pass"`), `os = ["linux", "darwin", "windows"]`, `os = ["`+otherOS()+`"]`, 1))
 	badTarget := write("bad.toml", "role = \"driver\"\n")
+	listensTarget := write("listens.toml", "role = \"collector\"\nos = [\"linux\", \"darwin\", \"windows\"]\nlauncher = \"external\"\n"+
+		"[external]\nurl = \"https://c.example/\"\nsession_token = [\"s\"]\n[collector]\nattachment = \"listens\"\n")
 	run := func(t *runner.T) {
 		in := t.Instance(attach.Params{Claim: "127.0.0.1:9", Out: "out", Capture: "none"})
 		for in.Exit() == "" {
@@ -112,7 +114,6 @@ func TestSubcommands(t *testing.T) {
 		{Name: "claim-ok", Cites: []string{"CLAIM-1"}, Role: "collector", Run: run},
 		{Name: "claim-again", Cites: []string{"CLAIM-1"}, Role: "collector", Run: run},
 	}
-	relayCases := []runner.Case{{Name: "relay-ok", Cites: []string{"CLAIM-1"}, Role: "relay", Run: run}}
 	header := func(target, role string) string {
 		return "relay-claim v0.4.0, conformance " + harness + ", against " + target + " (" + role + ", exec)\nmodels written from: " + modelsLine() + "\n"
 	}
@@ -170,8 +171,8 @@ func TestSubcommands(t *testing.T) {
 			wantErr: elsewhere + " declares os " + otherOS() + ", and this host's is " + runtime.GOOS,
 		},
 		{
-			name: "run against a launcher not built", s: threeReqs, cases: relayCases, args: []string{"run", "-target", relayTarget}, wantStatus: ExitFail,
-			wantErr: "the exec launcher runs a relay in the Linux sandbox, which is not built by this harness yet",
+			name: "run against an attachment not built", s: threeReqs, cases: cited, args: []string{"run", "-target", listensTarget}, wantStatus: ExitFail,
+			wantErr: "a collector that listens is named by the target-file format and not built by this harness yet",
 		},
 		{
 			name: "run a suite the runner refuses", s: threeReqs, cases: []runner.Case{{Name: "x", Cites: []string{"CLAIM-1"}, Role: "driver", Run: run}},

@@ -49,6 +49,13 @@
 //
 // A key the format does not name is an error, so a misspelt key is never
 // silently left out.
+//
+// A relay target whose launcher is exec or oci is started in the Linux
+// sandbox (package sandbox), which chooses its claim endpoint: its command
+// line holds {claim}, outside an optional group or in a variable of its env;
+// its build_link is outside the ranges the sandbox uses; and an oci relay's
+// link is "ip". The sandbox gives an exec relay a frames link as its file
+// descriptor 3.
 package target
 
 import (
