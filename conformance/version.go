@@ -33,10 +33,12 @@ type Model struct {
 // its package comment names the commit of buildwarden/buildwarden it was
 // written from.
 var Models = []Model{
-	// The claimant (package claimant).
+	// The claimant (package claimant), and the relay's claim endpoint
+	// (package relay).
 	{Directory: "relay-claim", Version: "v0.1.0"},
 	// The collector that tests a relay (package collector), which also
-	// serves the bootstrap config a relay carries.
+	// serves the bootstrap config a relay carries, and the relay's side of
+	// the collector protocol (package relay).
 	{Directory: "collector-outputs", Version: "v0.1.0"},
 	{Directory: "collector-inputs", Version: "v0.1.0"},
 	{Directory: "bootstrap-config", Version: "v0.1.0"},

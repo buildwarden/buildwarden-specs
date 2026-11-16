@@ -125,10 +125,13 @@ These hold in every specification directory.
   and serving the collector protocol on it; `collector` is the collector
   that tests a relay (`collector-outputs`, `collector-inputs`, and the
   bootstrap config it serves), startable in every form a collector target
-  may declare and recording each request it received in order; and
-  `ledger` verifies a ledger the relay wrote, written from
-  buildwarden/buildwarden's `specs/build-ledger/v1.md` at the commit its
-  package comment names. Their package comments say how each reads what its
+  may declare and recording each request it received in order; `relay` is
+  the relay that tests a collector (`relay-claim`'s relay, and the relay's
+  side of `collector-outputs` and `collector-inputs`), which a collector
+  that claims reaches at a claim address on loopback; `ledger` verifies a
+  ledger the relay wrote, and `ledgerwriter` writes the harness relay's
+  own, each written separately from buildwarden/buildwarden's
+  `specs/build-ledger/v1.md` at the commit its package comment names. Their package comments say how each reads what its
   documents leave open.
 - **Versions.** Each directory's `CHANGELOG.md` starts with the version its
   next release will be, `## vX.Y.Z`, newest first; a pull request that changes
