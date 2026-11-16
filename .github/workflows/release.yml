@@ -63,9 +63,16 @@ jobs:
           out="$RUNNER_TEMP/assets"
           mkdir -p "$out"
           export GOMODCACHE="$RUNNER_TEMP/modcache"
+          # This repository's own modules are fetched straight from GitHub at
+          # the tag, not through proxy.golang.org and sum.golang.org: a lookup
+          # of a version before its tag existed is cached there as "not
+          # found" for hours, and the release must not wait on it. The
+          # content is the same (the proxy serves the same tag's files, with
+          # the same h1: hash). Every other module still comes through the
+          # proxy and is checked against the go.sum the tag carries.
+          export GOPRIVATE=github.com/buildwarden/buildwarden-specs
           # Outside the checkout, so no go.work applies: the build is the
-          # tag's module as the proxy serves it, as a go.mod that names the
-          # tag gets it.
+          # tag's module as a go.mod that names the tag gets it.
           cd "$RUNNER_TEMP"
           for goos in linux darwin windows; do
             for goarch in amd64 arm64; do
