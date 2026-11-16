@@ -18,12 +18,13 @@ const identitySchema = "v1.identity.schema.json"
 // answers 200 with an identity. The tunnel and the claim carry the token the
 // relay was started with, if any; the claim carries the build_link the target
 // declares and, so that it does not depend on the relay's resolver
-// configuration, the harness's upstream address as its one resolver. It cites
-// only the reply: the tunnel's 101 and the token's form are checked by the
-// cases that cite their requirements.
+// configuration, the harness's upstream address as its one resolver. Beside
+// the reply it checks that the relay took the token in the form a claimant
+// sends it, and that the collector's requests came over the tunnel as
+// HTTP/2; the tunnel's 101 is oneTunnel's.
 var authorizedClaim = runner.Case{
 	Name:  "an authorized claim over the tunnel is answered 200 with an identity",
-	Cites: []string{"CLAIM-33"},
+	Cites: []string{"CLAIM-2", "CLAIM-8", "CLAIM-13", "CLAIM-33"},
 	Role:  "relay",
 	Ends:  true,
 	Run: func(t *runner.T) {
@@ -34,7 +35,8 @@ var authorizedClaim = runner.Case{
 			cfg.BuildLink = &claimant.BuildLink{Prefix: d.BuildLink.Prefix, Relay: d.BuildLink.Relay, Guest: d.BuildLink.Guest}
 		}
 		cl := claimant.Claimant{Net: t.Network(attach.Claim), Endpoint: in.Claim()}
-		tun, rep, err := cl.Session(t.Context(), collector.New(collector.Form{}, nil), cfg)
+		coll := collector.New(collector.Form{}, nil)
+		tun, rep, err := cl.Session(t.Context(), coll, cfg)
 		if tun != nil {
 			t.Cleanup(func() { _ = tun.Close() })
 		}
@@ -56,6 +58,15 @@ var authorizedClaim = runner.Case{
 		}
 		if !ca.IsCA {
 			t.Errorf("the claim's ca_cert, %q, is not a certificate authority's", ca.Subject)
+		}
+		reqs := coll.Requests()
+		if len(reqs) == 0 {
+			t.Errorf("the collector on the tunnel received no request before the claim's 200")
+		}
+		for _, q := range reqs {
+			if q.Proto != "HTTP/2.0" {
+				t.Errorf("%s %s reached the collector over %s, not the tunnel's HTTP/2", q.Method, q.Path, q.Proto)
+			}
 		}
 	},
 }
