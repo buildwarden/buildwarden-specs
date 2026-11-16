@@ -1,2 +1,5 @@
 # The requirements of collector-outputs/v1.md that no case of its suite checks, one to a
 # line: the identifier, a space and the reason (see the README's conventions).
+COLLOUT-2 It permits a collector to close a completed session's connection; nothing a collector does can fail it.
+COLLOUT-10 It asks for a comparison whose time does not depend on the token; a case cannot measure that reliably over a network.
+COLLOUT-24 It concerns a failure of the collector's own storage, which a case cannot cause from outside the collector.

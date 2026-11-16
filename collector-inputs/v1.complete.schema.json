@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/buildwarden/buildwarden-specs/collector-inputs/v1.complete.schema.json",
+  "title": "collector-inputs v1: the body of POST /v1/complete",
+  "description": "The build's result, as a relay sends it (COLLIN-23, COLLIN-32). A collector ignores a member it does not know.",
+  "type": "object",
+  "properties": {
+    "exit_code": {
+      "description": "The build's exit code: 0 is success.",
+      "type": "integer"
+    },
+    "message": {
+      "description": "Text for a person about the build's end; may be empty.",
+      "type": "string"
+    },
+    "error": {
+      "description": "Text for a person about a failure of the build's run; may be empty.",
+      "type": "string"
+    }
+  },
+  "required": ["exit_code", "message", "error"]
+}
