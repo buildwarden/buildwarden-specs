@@ -1,18 +1,14 @@
 name: flow18
 
-# FLOW-18 of buildwarden/buildwarden: agent sessions that commit here are
-# recorded only to the private repository buildwarden/buildwarden-sessions, and
-# this public repository carries no entire/ ref. The check is written out here
-# because this repository cannot call that repository's
-# tools/workflow/flow18-check.sh; it holds the same two conditions. A ref pushed
-# under entire/ triggers no workflow, so the check also runs daily.
+# FLOW-18: sessions are recorded only to buildwarden/buildwarden-sessions. A ref
+# pushed under entire/ triggers no workflow, so the check also runs daily.
 on:
   push:
-    branches: [main]
+    branches: [main, 'program/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'program/**']
   schedule:
-    - cron: '23 12 * * *'
+    - cron: '54 12 * * *'
   workflow_dispatch:
 
 permissions:
