@@ -24,4 +24,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: conformance/go.mod
+      # A change into or on a program trunk, program/**, is held to the
+      # program's release rules: see check-release in the Makefile.
       - run: make check
+        env:
+          PROGRAM: ${{ startsWith(github.base_ref || github.ref_name, 'program/') && '1' || '' }}

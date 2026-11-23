@@ -1,26 +1,62 @@
 name: release
 run-name: release ${{ inputs.tag || github.ref_name }}
 
-# A release is a tag <directory>/vX.Y.Z on main, one directory to a tag. For a
-# specification's tag this builds its command, bw-conformance-<directory>, with
-# go install <command>@vX.Y.Z, the tag without its directory (Go names a
+# A release is a tag <directory>/vX.Y.Z on main, one directory to a tag, at
+# the version at the head of the directory's CHANGELOG.md. For a
+# specification's tag this builds its command, bw-conformance-<directory>,
+# with go install <command>@vX.Y.Z, the tag without its directory (Go names a
 # subdirectory module's version by the bare version), for three operating
 # systems and two architectures, which builds exactly what the tag serves
 # with the versions its go.mod lists, and attaches the binaries to the tag's
 # release with SHA256SUMS. A tag conformance/vX.Y.Z releases the harness,
 # which has no binary: its run checks the tag and attaches nothing.
 #
+# A pre-release is a tag <directory>/vX.Y.Z-dev.N or <directory>/vX.Y.Z-rc.N,
+# N counting from 1, the harness's included, which the development loop
+# pushes on the program trunk, program/componentization (FLOW-20). Any other
+# suffix is refused. Its commit is on the program trunk, not necessarily on
+# main, and its X.Y.Z is the version at the head of the directory's
+# CHANGELOG.md: the version the program's change to the directory will be
+# released as, so the pre-release orders below that release. On a push, that
+# X.Y.Z is also newer than every release of the directory, so the
+# pre-release orders above what is released. The loop's wf tag-next proposes
+# pre-releases of the next minor after the directory's newest release, and
+# ci holds a program trunk's change to the same rule (make check-release
+# with PROGRAM: a changed directory's CHANGELOG.md heads with that minor), so
+# the two agree. A -dev tag of it works before the entry is final, since the
+# entry may grow under the same heading until the release.
+#
+# A specification's pre-release is built as a release is, with go install
+# <command>@vX.Y.Z-dev.N, which resolves the harness at the version the
+# tagged go.mod requires. On the program trunk the harness's head has only
+# pre-release tags, unless it is released, so a specification's go.mod there
+# requires the pre-release of it that the tree's harness is, conformance
+# vX.Y.Z-dev.N or -rc.N: the newest one tagged, or, when the same merge
+# changes the harness, the -dev tag wf tag-next pushes for it (check-release
+# with PROGRAM holds it to that, so the binary is built against the harness
+# ci tested; go.work replaces that version too), and the loop pushes that
+# harness tag first. Before it builds, the check confirms that
+# the harness version the tagged go.mod requires has its tag, a release's a
+# release, so a missing harness tag fails with a message and not in go
+# install. A pre-release is published as a GitHub pre-release that is never
+# marked latest, the harness's too (with nothing attached). Its notes are the
+# CHANGELOG.md section of X.Y.Z, under a line naming the program trunk and
+# the commit, or that line alone when there is no such section.
+#
 # A push of more than three tags starts no run, so tags are pushed one to a
 # push, the harness's first: go install resolves the harness version a
 # specification names. A run that was missed or failed is made again by hand
-# for the tag that exists, which is never moved.
+# for the tag that exists, which is never moved. Such a rerun skips the check
+# that a pre-release's X.Y.Z is newer than every release (speccheck tag runs
+# with -pushed only on a push), so a pre-release can be rebuilt after its
+# release is tagged.
 on:
   push:
     tags: ['*/v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: 'An existing tag, <directory>/vX.Y.Z'
+        description: 'An existing tag, <directory>/vX.Y.Z, or a pre-release <directory>/vX.Y.Z-dev.N or -rc.N'
         required: true
         type: string
 
@@ -35,7 +71,15 @@ jobs:
       contents: write
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+      # The program trunk a pre-release is tagged on. A second program adds
+      # its trunk here and a -program flag for it below.
+      PROGRAM: program/componentization
     steps:
+      # fetch-depth 0 fetches every branch, main and the program trunk among
+      # them, as origin/<branch>, and every tag: speccheck reads the tagged
+      # commit's ancestry from them, that a pre-release's X.Y.Z is newer than
+      # every release of its directory, and that the harness version a
+      # specification's go.mod requires is tagged.
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
@@ -46,14 +90,26 @@ jobs:
           go-version-file: conformance/go.mod
           cache: false
 
-      - name: The tag is on main and is the version at the head of its CHANGELOG.md
+      - name: The tag is a release on main or a pre-release on the program trunk, of the version at the head of its CHANGELOG.md
+        env:
+          # On a push the tag is new; a run by hand rebuilds a tag that
+          # exists, perhaps after its release was tagged.
+          PUSHED: ${{ github.event_name == 'push' && '-pushed' || '' }}
         run: |
-          go run ./conformance/internal/speccheck tag -main origin/main "$TAG" \
+          set -eu
+          git rev-parse --verify --quiet "origin/$PROGRAM^{commit}" > /dev/null ||
+            echo "::notice::origin/$PROGRAM is not in the checkout; only a release without a suffix can pass"
+          go run ./conformance/internal/speccheck tag -main origin/main -program "origin/$PROGRAM" $PUSHED "$TAG" \
             bootstrap-config collector-inputs collector-outputs executor-initialize relay-claim relay-guest-api
           dir=${TAG%/*}
           version=${TAG##*/}
+          release=${version%%-*}
+          prerelease=false
+          [ "$version" != "$release" ] && prerelease=true
           echo "DIR=$dir" >> "$GITHUB_ENV"
           echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE=$release" >> "$GITHUB_ENV"
+          echo "PRERELEASE=$prerelease" >> "$GITHUB_ENV"
 
       - name: Build the command for each operating system and architecture
         if: env.DIR != 'conformance'
@@ -96,7 +152,7 @@ jobs:
           go version -m "bw-conformance-${DIR}_${VERSION}_linux_amd64"
 
       - name: Attach the binaries to the tag's release
-        if: env.DIR != 'conformance'
+        if: env.DIR != 'conformance' && env.PRERELEASE == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -110,4 +166,39 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --title "$TAG" \
               --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/assets/*
+          fi
+
+      - name: Publish the pre-release, never marked latest
+        if: env.PRERELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          sha=$(git rev-parse HEAD)
+          # The notes are the section of X.Y.Z in the CHANGELOG.md, under a
+          # line naming where the pre-release comes from; the line alone when
+          # the CHANGELOG.md has no such section.
+          awk -v v="## $RELEASE" '$0 == v { on = 1; next } on && /^## / { exit } on' \
+            "$DIR/CHANGELOG.md" > "$RUNNER_TEMP/section.md"
+          {
+            echo "Pre-release of $RELEASE from $PROGRAM at $sha."
+            if grep -q '[^[:space:]]' "$RUNNER_TEMP/section.md"; then
+              echo
+              cat "$RUNNER_TEMP/section.md"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          # The harness has no binaries: its pre-release attaches nothing.
+          assets=()
+          if [ "$DIR" != conformance ]; then
+            assets=("$RUNNER_TEMP"/assets/*)
+          fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --prerelease --latest=false
+            if [ ${#assets[@]} -gt 0 ]; then
+              gh release upload "$TAG" --clobber "${assets[@]}"
+            fi
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --prerelease --latest=false \
+              --notes-file "$RUNNER_TEMP/notes.md" "${assets[@]}"
           fi
