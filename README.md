@@ -178,7 +178,8 @@ These hold in every specification directory.
 ## Releases
 
 A release is a tag `<directory>/vX.Y.Z` on a commit of `main`, one directory
-to a tag, at the version at the head of that directory's `CHANGELOG.md`. A tag
+to a tag, at the version at the head of that directory's `CHANGELOG.md`; a
+pre-release, below, is one with a suffix on a program trunk. A tag
 is never moved: a fault found after a release is fixed by a pull request and a
 new release of the directory at fault.
 
@@ -194,6 +195,16 @@ new release of the directory at fault.
 - **The harness's release**, `conformance/vX.Y.Z`, attaches nothing. Its tag
   is pushed before the tags of the specifications that name it, because
   `go install` resolves it.
+- **A pre-release** is a tag `<directory>/vX.Y.Z-dev.N` or
+  `<directory>/vX.Y.Z-rc.N`, `N` counting from 1, the harness's included,
+  which the development loop pushes on the program trunk
+  `program/componentization`. Its commit is on the program trunk, and its
+  `vX.Y.Z` is the version at the head of the directory's `CHANGELOG.md`, not
+  yet released, so it orders below that release. It is built and attached
+  as a release is, and published as a GitHub pre-release that is never
+  marked latest, with the `CHANGELOG.md` section of `vX.Y.Z` as its notes.
+  Any other suffix is refused. Only a program trunk's pins may name a
+  pre-release.
 - **Tags are pushed one to a push,** because a push of more than three tags
   starts no workflow run. A run that was missed or that failed is made again
   by hand, `release` with the existing tag as its input, without touching

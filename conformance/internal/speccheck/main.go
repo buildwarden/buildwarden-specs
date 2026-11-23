@@ -5,15 +5,17 @@
 //	speccheck docs <directory>...
 //	speccheck modules <directory>...
 //	speccheck release -base <ref> <directory>...
-//	speccheck tag -main <ref> <tag> <directory>...
+//	speccheck tag -main <ref> [-program <ref>]... <tag> <directory>...
 //
 // The directories are the specifications'; the harness's is implied where a
 // check reads it. docs runs the checks that read documents only; modules,
 // the module checks a parser can make; release, the release checks of the
 // change from the merge base of <ref> and HEAD to the working tree. tag is
 // the release workflow's check of the tag it releases: the checkout is at
-// the tagged commit, that commit is on <ref>, and the tag is the version at
-// the head of its directory's CHANGELOG.md.
+// the tagged commit, and the tag's vX.Y.Z is the version at the head of its
+// directory's CHANGELOG.md. A release, <directory>/vX.Y.Z, is on the -main
+// ref. A pre-release, <directory>/vX.Y.Z-dev.N or -rc.N, is on one of the
+// -program refs, the program trunks, and its vX.Y.Z has no tag yet.
 package main
 
 import (
@@ -35,7 +37,7 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	usage := "usage:\n  speccheck docs <directory>...\n  speccheck modules <directory>...\n  speccheck release -base <ref> <directory>...\n  speccheck tag -main <ref> <tag> <directory>...\n"
+	usage := "usage:\n  speccheck docs <directory>...\n  speccheck modules <directory>...\n  speccheck release -base <ref> <directory>...\n  speccheck tag -main <ref> [-program <ref>]... <tag> <directory>...\n"
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -59,12 +61,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "tag":
 		fset := flag.NewFlagSet("tag", flag.ContinueOnError)
 		fset.SetOutput(stderr)
-		onto := fset.String("main", "", "the ref the tagged commit must be on, such as origin/main")
+		onto := fset.String("main", "", "the ref a release's commit must be on, such as origin/main")
+		var programs []string
+		fset.Func("program", "a program trunk a pre-release's commit may be on, such as origin/program/componentization; may be given more than once", func(ref string) error {
+			if ref == "" {
+				return errors.New("an empty ref")
+			}
+			programs = append(programs, ref)
+			return nil
+		})
 		if fset.Parse(args[1:]) != nil || *onto == "" || fset.NArg() == 0 {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		err = tag(repo, *onto, fset.Arg(0), fset.Args()[1:])
+		err = tag(repo, *onto, programs, fset.Arg(0), fset.Args()[1:])
 	default:
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -114,19 +124,23 @@ func release(repo fs.FS, base string, specs []string) error {
 }
 
 // tag gathers from git what the tag check needs beside the files: that the
-// working tree is the tagged commit's, so the files read are the release's,
-// and that the commit is on onto, the ref of main.
-func tag(repo fs.FS, onto, name string, specs []string) error {
+// working tree is the tagged commit's, so the files read are the release's;
+// for a release, that the commit is on onto, the ref of main; and for a
+// pre-release, that the commit is on one of programs, the refs of the
+// program trunks, and that the release it comes before has no tag yet, so
+// that it orders below every release of its directory still to come.
+func tag(repo fs.FS, onto string, programs []string, name string, specs []string) error {
 	commit, err := git("rev-parse", "--verify", "refs/tags/"+name+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("the tag %s: %w", name, err)
 	}
+	commit = strings.TrimSpace(commit)
 	head, err := git("rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(head) != strings.TrimSpace(commit) {
-		return fmt.Errorf("the checkout is at %s and the tag %s at %s: check out the tag", strings.TrimSpace(head), name, strings.TrimSpace(commit))
+	if strings.TrimSpace(head) != commit {
+		return fmt.Errorf("the checkout is at %s and the tag %s at %s: check out the tag", strings.TrimSpace(head), name, commit)
 	}
 	dirty, err := git("status", "--porcelain")
 	if err != nil {
@@ -135,11 +149,37 @@ func tag(repo fs.FS, onto, name string, specs []string) error {
 	if strings.TrimSpace(dirty) != "" {
 		return fmt.Errorf("the working tree differs from the tag %s:\n%s", name, strings.TrimRight(dirty, "\n"))
 	}
-	if _, err := git("merge-base", "--is-ancestor", strings.TrimSpace(commit), onto); err != nil {
-		return fmt.Errorf("the tag %s is not on %s: a release is a tag on main (%w)", name, onto, err)
+	t, err := check.Tag(repo, name, specs)
+	if err != nil {
+		return err
 	}
-	_, _, err = check.Tag(repo, name, specs)
-	return err
+	if !t.Prerelease {
+		if _, err := git("merge-base", "--is-ancestor", commit, onto); err != nil {
+			return fmt.Errorf("the tag %s is not on %s: a release is a tag on main (%w)", name, onto, err)
+		}
+		return nil
+	}
+	if len(programs) == 0 {
+		return fmt.Errorf("the tag %s is a pre-release, and no program trunk is named (-program): a pre-release is a tag on a program trunk", name)
+	}
+	on := false
+	for _, ref := range programs {
+		if _, err := git("rev-parse", "--verify", "--quiet", ref+"^{commit}"); err != nil {
+			return fmt.Errorf("the program trunk %s: %w (the checkout needs the program trunks; in a workflow, a checkout with fetch-depth 0)", ref, err)
+		}
+		if _, err := git("merge-base", "--is-ancestor", commit, ref); err == nil {
+			on = true
+			break
+		}
+	}
+	if !on {
+		return fmt.Errorf("the tag %s is not on %s: a pre-release is a tag on a program trunk", name, strings.Join(programs, " or "))
+	}
+	release := t.Dir + "/" + t.Release
+	if _, err := git("rev-parse", "--verify", "--quiet", "refs/tags/"+release); err == nil {
+		return fmt.Errorf("the tag %s is a pre-release of %s, which is already released: a pre-release comes before its release", name, release)
+	}
+	return nil
 }
 
 func git(args ...string) (string, error) {

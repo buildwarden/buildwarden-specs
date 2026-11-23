@@ -16,4 +16,4 @@ use (
 // workspace builds every specification against this tree's harness. The line
 // must name the version: a pull request that raises the harness's version
 // edits it too, and ci checks the two agree.
-replace github.com/buildwarden/buildwarden-specs/conformance v0.1.0 => ./conformance
+replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0 => ./conformance
