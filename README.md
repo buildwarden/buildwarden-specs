@@ -199,12 +199,24 @@ new release of the directory at fault.
   `<directory>/vX.Y.Z-rc.N`, `N` counting from 1, the harness's included,
   which the development loop pushes on the program trunk
   `program/componentization`. Its commit is on the program trunk, and its
-  `vX.Y.Z` is the version at the head of the directory's `CHANGELOG.md`, not
-  yet released, so it orders below that release. It is built and attached
-  as a release is, and published as a GitHub pre-release that is never
-  marked latest, with the `CHANGELOG.md` section of `vX.Y.Z` as its notes.
-  Any other suffix is refused. Only a program trunk's pins may name a
+  `vX.Y.Z` is the version at the head of the directory's `CHANGELOG.md`, the
+  next minor after the directory's newest release, which is what the loop's
+  `wf tag-next` proposes and what `ci` requires of a program trunk's change
+  (`make check-release PROGRAM=1`). So it orders above every release and
+  below the release still to come; when pushed, a tag whose `vX.Y.Z` is not
+  newer than every release is refused. It is built and attached as a
+  release is, and published as a GitHub pre-release that is never marked
+  latest, with the `CHANGELOG.md` section of `vX.Y.Z` as its notes. Any
+  other suffix is refused. Only a program trunk's pins may name a
   pre-release.
+- **A specification's go.mod on a program trunk** requires the harness at
+  the head of `conformance/CHANGELOG.md` or at a pre-release of it,
+  `conformance vX.Y.Z-dev.N` or `-rc.N`, since there the harness's head has
+  only pre-release tags and `go install` resolves the version the `go.mod`
+  requires; `go.work` then replaces that version by `./conformance` too.
+  The harness's tag is pushed first, and the `release` workflow confirms the
+  required harness version is tagged before it builds (a release's must be a
+  release). On `main`, a specification requires the harness's release.
 - **Tags are pushed one to a push,** because a push of more than three tags
   starts no workflow run. A run that was missed or that failed is made again
   by hand, `release` with the existing tag as its input, without touching

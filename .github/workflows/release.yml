@@ -16,21 +16,37 @@ run-name: release ${{ inputs.tag || github.ref_name }}
 # pushes on the program trunk, program/componentization (FLOW-20). Any other
 # suffix is refused. Its commit is on the program trunk, not necessarily on
 # main, and its X.Y.Z is the version at the head of the directory's
-# CHANGELOG.md, which has no tag yet: the version the program's change to the
-# directory will be released as, so the pre-release orders below that
-# release. The loop's wf tag-next proposes the next minor after the newest
-# release, so a program change to a directory heads its CHANGELOG.md with
-# that version; a -dev tag of it works before the entry is final, since the
-# entry may grow under the same heading until the release. It is built as a
-# release is, go install accepting the pre-release version, and published as
-# a GitHub pre-release that is never marked latest, the harness's too (with
-# nothing attached). Its notes are the CHANGELOG.md section of X.Y.Z, under
-# a line naming the program trunk and the commit.
+# CHANGELOG.md: the version the program's change to the directory will be
+# released as, so the pre-release orders below that release. On a push, that
+# X.Y.Z is also newer than every release of the directory, so the
+# pre-release orders above what is released. The loop's wf tag-next proposes
+# pre-releases of the next minor after the directory's newest release, and
+# ci holds a program trunk's change to the same rule (make check-release
+# with PROGRAM: a changed directory's CHANGELOG.md heads with that minor), so
+# the two agree. A -dev tag of it works before the entry is final, since the
+# entry may grow under the same heading until the release.
+#
+# A specification's pre-release is built as a release is, with go install
+# <command>@vX.Y.Z-dev.N, which resolves the harness at the version the
+# tagged go.mod requires. On the program trunk the harness's head has only
+# pre-release tags, so a specification's go.mod there requires the harness's
+# head or a pre-release of it, conformance vX.Y.Z-dev.N or -rc.N (check-release
+# with PROGRAM allows it; go.work replaces that version too), and the loop
+# pushes that harness tag first. Before it builds, the check confirms that
+# the harness version the tagged go.mod requires has its tag, a release's a
+# release, so a missing harness tag fails with a message and not in go
+# install. A pre-release is published as a GitHub pre-release that is never
+# marked latest, the harness's too (with nothing attached). Its notes are the
+# CHANGELOG.md section of X.Y.Z, under a line naming the program trunk and
+# the commit, or that line alone when there is no such section.
 #
 # A push of more than three tags starts no run, so tags are pushed one to a
 # push, the harness's first: go install resolves the harness version a
 # specification names. A run that was missed or failed is made again by hand
-# for the tag that exists, which is never moved.
+# for the tag that exists, which is never moved. Such a rerun skips the check
+# that a pre-release's X.Y.Z is newer than every release (speccheck tag runs
+# with -pushed only on a push), so a pre-release can be rebuilt after its
+# release is tagged.
 on:
   push:
     tags: ['*/v*']
@@ -58,8 +74,9 @@ jobs:
     steps:
       # fetch-depth 0 fetches every branch, main and the program trunk among
       # them, as origin/<branch>, and every tag: speccheck reads the tagged
-      # commit's ancestry from them and that no release of a pre-release's
-      # X.Y.Z is tagged yet.
+      # commit's ancestry from them, that a pre-release's X.Y.Z is newer than
+      # every release of its directory, and that the harness version a
+      # specification's go.mod requires is tagged.
       - uses: actions/checkout@v4
         with:
           ref: refs/tags/${{ inputs.tag || github.ref_name }}
@@ -71,11 +88,15 @@ jobs:
           cache: false
 
       - name: The tag is a release on main or a pre-release on the program trunk, of the version at the head of its CHANGELOG.md
+        env:
+          # On a push the tag is new; a run by hand rebuilds a tag that
+          # exists, perhaps after its release was tagged.
+          PUSHED: ${{ github.event_name == 'push' && '-pushed' || '' }}
         run: |
           set -eu
           git rev-parse --verify --quiet "origin/$PROGRAM^{commit}" > /dev/null ||
             echo "::notice::origin/$PROGRAM is not in the checkout; only a release without a suffix can pass"
-          go run ./conformance/internal/speccheck tag -main origin/main -program "origin/$PROGRAM" "$TAG" \
+          go run ./conformance/internal/speccheck tag -main origin/main -program "origin/$PROGRAM" $PUSHED "$TAG" \
             bootstrap-config collector-inputs collector-outputs executor-initialize relay-claim relay-guest-api
           dir=${TAG%/*}
           version=${TAG##*/}

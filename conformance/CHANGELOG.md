@@ -11,8 +11,16 @@ line of `go.work` to it.
   accepts a pre-release, `<directory>/vX.Y.Z-dev.N` or
   `<directory>/vX.Y.Z-rc.N`, on a program trunk it names with `-program`,
   when its X.Y.Z is the version at the head of the directory's
-  `CHANGELOG.md` and is not yet tagged; any other suffix is refused. A
-  release without a suffix is checked as before.
+  `CHANGELOG.md` and, with `-pushed`, newer than every release of the
+  directory; any other suffix is refused. For a specification's tag it also
+  checks that the harness version its `go.mod` requires is tagged, and a
+  release's is a release.
+- `speccheck release -program` (the Makefile's `PROGRAM`, which `ci` sets on
+  `program/**`) holds a program trunk's change to the next minor after each
+  changed directory's newest release, and lets a specification require a
+  pre-release of the harness's head; `speccheck modules` accepts `go.work`
+  replace lines at such pre-releases and requires one for each a `go.mod`
+  requires.
 
 ## v0.1.0
 

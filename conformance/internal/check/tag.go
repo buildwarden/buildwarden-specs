@@ -6,6 +6,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/spec"
@@ -15,6 +16,55 @@ import (
 // counting from 1, with no leading zero and no build metadata. Its first
 // group is vX.Y.Z, the release it comes before.
 var prerelease = regexp.MustCompile(`^(v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-(?:dev|rc)\.[1-9][0-9]*$`)
+
+// release is a release version, vX.Y.Z with no suffix, its three numbers
+// in its groups.
+var release = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+// PrereleaseOf returns the release vX.Y.Z that the version v comes before
+// when v is a pre-release, vX.Y.Z-dev.N or vX.Y.Z-rc.N, and whether it is.
+func PrereleaseOf(v string) (string, bool) {
+	m := prerelease.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// IsRelease says whether the version v is a release, vX.Y.Z with no suffix.
+func IsRelease(v string) bool {
+	return release.MatchString(v)
+}
+
+// Releases returns the versions that are releases, vX.Y.Z with no suffix,
+// dropping the pre-releases and anything else.
+func Releases(versions []string) []string {
+	var out []string
+	for _, v := range versions {
+		if IsRelease(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// NextRelease is the version a program change to a directory is released
+// as, given the versions of the directory's tags: the next minor after its
+// newest release, pre-releases ignored, or v0.1.0 when it has none. It is
+// the version the loop's wf tag-next proposes pre-releases of, so a program
+// trunk heads a changed directory's CHANGELOG.md with it.
+func NextRelease(versions []string) string {
+	newest := Newest(Releases(versions))
+	if newest == "" {
+		return "v0.1.0"
+	}
+	m := release.FindStringSubmatch(newest)
+	minor, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "v0.1.0"
+	}
+	return fmt.Sprintf("v%s.%d.0", m[1], minor+1)
+}
 
 // Tagged is what a tag names, once Tag has checked it.
 type Tagged struct {
@@ -57,11 +107,11 @@ func Tag(fsys fs.FS, tag string, specs []string) (Tagged, error) {
 	}
 	t := Tagged{Dir: dir, Version: version, Release: version}
 	if strings.Contains(version, "-") {
-		m := prerelease.FindStringSubmatch(version)
-		if m == nil {
+		r, ok := PrereleaseOf(version)
+		if !ok {
 			return Tagged{}, fmt.Errorf("the tag %q has a suffix that is not -dev.N or -rc.N: a pre-release is <directory>/vX.Y.Z-dev.N or <directory>/vX.Y.Z-rc.N, N counting from 1", tag)
 		}
-		t.Release, t.Prerelease = m[1], true
+		t.Release, t.Prerelease = r, true
 	}
 	file := path.Join(dir, spec.ChangelogFile)
 	b, err := fs.ReadFile(fsys, file)
