@@ -145,6 +145,8 @@ type relayInstance struct {
 	cmd      *exec.Cmd
 	done     chan struct{}
 	log      logBuffer
+	// phases is an oci start's, recorded as it reaches each.
+	phases ociPhases
 
 	mu   sync.Mutex
 	exit string
@@ -264,19 +266,33 @@ func (in *relayInstance) startOCI(ctx context.Context) error {
 	in.cmd = exec.Command(rt, ociRun(o, name, in.sb.ResolvConf(), env, args)...)
 	in.cmd.Env = append(os.Environ(), env...)
 	in.cmd.Stdout, in.cmd.Stderr = &in.log, &in.log
+	in.phases.run = time.Now()
 	if err := in.cmd.Start(); err != nil {
 		in.cmd = nil
 		return fmt.Errorf("starting %s: %w", o.Runtime, err)
 	}
 	go in.wait()
-	pid, err := in.containerPID(ctx, rt, name, containerLimit)
+	if err := in.awaitOCI(ctx, rt, name); err != nil {
+		return fmt.Errorf("%w\nthe start's phases: %s\nthe runtime's state of %s: %s", err, in.phases, name, ociState(rt, name))
+	}
+	return nil
+}
+
+// awaitOCI waits for a started oci relay's container to be running, gives
+// it its links, and waits for the relay to serve its claim endpoint.
+func (in *relayInstance) awaitOCI(ctx context.Context, rt, name string) error {
+	pid, err := in.containerPID(ctx, rt, name, containerLimit, &in.phases)
 	if err != nil {
 		return err
 	}
 	if err := in.sb.Build(pid); err != nil {
 		return err
 	}
-	return in.sb.WaitListening(ctx, pid, in.done)
+	if err := in.sb.WaitListening(ctx, pid, in.done); err != nil {
+		return err
+	}
+	in.phases.serving = time.Now()
+	return nil
 }
 
 // containerLimit is how long the runtime has to start an oci relay's
@@ -286,8 +302,9 @@ func (in *relayInstance) startOCI(ctx context.Context) error {
 const containerLimit = CommandLimit
 
 // containerPID waits, for at most limit, for the container to be running
-// and returns its process's ID.
-func (in *relayInstance) containerPID(ctx context.Context, rt, name string, limit time.Duration) (int, error) {
+// and returns its process's ID. It records in ph when the runtime first
+// returned the container and when the container had a process.
+func (in *relayInstance) containerPID(ctx context.Context, rt, name string, limit time.Duration, ph *ociPhases) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	never := "the relay under test was never running"
@@ -295,7 +312,11 @@ func (in *relayInstance) containerPID(ctx context.Context, rt, name string, limi
 		// Bounded by what is left of the wait.
 		out, err := exec.CommandContext(ctx, rt, ociInspect(name)...).Output()
 		if err == nil {
+			if ph.listed.IsZero() {
+				ph.listed = time.Now()
+			}
 			if pid, _ := strconv.Atoi(strings.TrimSpace(string(out))); pid > 0 {
+				ph.running = time.Now()
 				return pid, nil
 			}
 		}
@@ -307,6 +328,38 @@ func (in *relayInstance) containerPID(ctx context.Context, rt, name string, limi
 		case <-time.After(sandbox.StartPoll):
 		}
 	}
+}
+
+// ociPhases is when an oci start reached each of its phases, zero for one
+// it did not reach: the runtime's run command started, the runtime's inspect
+// first returned the container, the container had a process, and the relay
+// served its claim endpoint. A failed start prints them, so that it says
+// whether the time went to the runtime or to the relay.
+type ociPhases struct {
+	run, listed, running, serving time.Time
+}
+
+func (ph ociPhases) String() string {
+	at := func(t time.Time) string {
+		if t.IsZero() {
+			return "not reached"
+		}
+		return "after " + t.Sub(ph.run).Round(time.Millisecond).String()
+	}
+	return fmt.Sprintf("run started at %s; inspect first returned the container %s; the container had a process %s; the claim endpoint answered %s",
+		ph.run.UTC().Format("15:04:05.000"), at(ph.listed), at(ph.running), at(ph.serving))
+}
+
+// ociState is the runtime's inspect state of the container name, or what
+// the runtime said when it could not give it, for a failed start's report.
+func ociState(rt, name string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), CommandLimit)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, rt, "inspect", "--format", "{{json .State}}", name).CombinedOutput()
+	if err != nil {
+		return fmt.Sprintf("%v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func (in *relayInstance) wait() {
