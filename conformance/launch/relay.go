@@ -269,7 +269,7 @@ func (in *relayInstance) startOCI(ctx context.Context) error {
 		return fmt.Errorf("starting %s: %w", o.Runtime, err)
 	}
 	go in.wait()
-	pid, err := in.containerPID(ctx, rt, name)
+	pid, err := in.containerPID(ctx, rt, name, containerLimit)
 	if err != nil {
 		return err
 	}
@@ -279,12 +279,20 @@ func (in *relayInstance) startOCI(ctx context.Context) error {
 	return in.sb.WaitListening(ctx, pid, in.done)
 }
 
-// containerPID waits, for at most sandbox.StartLimit, for the container to be
-// running and returns its process's ID.
-func (in *relayInstance) containerPID(ctx context.Context, rt, name string) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, sandbox.StartLimit)
+// containerLimit is how long the runtime has to start an oci relay's
+// container: the bound of a target's own command, since the runtime is not
+// the component under test. The relay's own bound, sandbox.StartLimit, runs
+// from when its container is running.
+const containerLimit = CommandLimit
+
+// containerPID waits, for at most limit, for the container to be running
+// and returns its process's ID.
+func (in *relayInstance) containerPID(ctx context.Context, rt, name string, limit time.Duration) (int, error) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+	never := "the relay under test was never running"
 	for {
+		// Bounded by what is left of the wait.
 		out, err := exec.CommandContext(ctx, rt, ociInspect(name)...).Output()
 		if err == nil {
 			if pid, _ := strconv.Atoi(strings.TrimSpace(string(out))); pid > 0 {
@@ -293,9 +301,9 @@ func (in *relayInstance) containerPID(ctx context.Context, rt, name string) (int
 		}
 		select {
 		case <-in.done:
-			return 0, fmt.Errorf("%s run %s exited before the container was running", in.f.OCI.Runtime, name)
+			return 0, fmt.Errorf("%s run %s exited before the container was running: %s", in.f.OCI.Runtime, name, never)
 		case <-ctx.Done():
-			return 0, fmt.Errorf("the container %s was not running within %s", name, sandbox.StartLimit)
+			return 0, fmt.Errorf("the runtime %s did not start the container %s within %s: %s", in.f.OCI.Runtime, name, limit, never)
 		case <-time.After(sandbox.StartPoll):
 		}
 	}
