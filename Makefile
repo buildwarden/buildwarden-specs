@@ -12,6 +12,11 @@ SPECCHECK := go run ./conformance/internal/speccheck
 # The ref a change is measured from by the release checks.
 BASE ?= origin/main
 
+# Set (to anything) when the change is a program trunk's, such as a pull
+# request into program/componentization: check-release then holds it to the
+# program's rules (speccheck release -program). ci sets it on program/**.
+PROGRAM ?=
+
 # Everything ci runs. Each module is built from the working tree, through
 # go.work, so a change to the harness is tested against every specification's
 # cases.
@@ -63,10 +68,19 @@ check-tidy:
 
 # A change to a directory adds a version to its CHANGELOG.md higher than its
 # newest tag, and a changed specification's go.mod names the harness version
-# at the head of conformance/CHANGELOG.md. The change is measured from the
-# merge base of BASE and HEAD, so the history and the tags must be there.
+# at the head of conformance/CHANGELOG.md. With PROGRAM, a program trunk's
+# change heads a changed directory with the next minor after its newest
+# release, the version the loop's pre-release tags are of, and a changed
+# specification names, unless the harness's head is released, the
+# pre-release of it the tree's harness is: its newest tag, or, when the
+# change touches the harness, the next -dev tag wf tag-next pushes. The
+# newest-tag rule counts releases only, so main's patches may stay below a
+# program's pre-releases. The
+# change is measured from the merge base of BASE and HEAD, so the history and
+# the tags must be there.
 check-release:
-	@echo "speccheck release: from $(BASE)"; $(SPECCHECK) release -base $(BASE) $(SPECS)
+	@echo "speccheck release: from $(BASE)$(if $(PROGRAM), (a program trunk's change))"; \
+	$(SPECCHECK) release -base $(BASE) $(if $(PROGRAM),-program) $(SPECS)
 
 vet:
 	@set -e; for m in $(MODULES); do echo "go vet: $$m"; (cd $$m && go vet ./...); done
