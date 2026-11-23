@@ -29,10 +29,13 @@ run-name: release ${{ inputs.tag || github.ref_name }}
 # A specification's pre-release is built as a release is, with go install
 # <command>@vX.Y.Z-dev.N, which resolves the harness at the version the
 # tagged go.mod requires. On the program trunk the harness's head has only
-# pre-release tags, so a specification's go.mod there requires the harness's
-# head or a pre-release of it, conformance vX.Y.Z-dev.N or -rc.N (check-release
-# with PROGRAM allows it; go.work replaces that version too), and the loop
-# pushes that harness tag first. Before it builds, the check confirms that
+# pre-release tags, unless it is released, so a specification's go.mod there
+# requires the pre-release of it that the tree's harness is, conformance
+# vX.Y.Z-dev.N or -rc.N: the newest one tagged, or, when the same merge
+# changes the harness, the -dev tag wf tag-next pushes for it (check-release
+# with PROGRAM holds it to that, so the binary is built against the harness
+# ci tested; go.work replaces that version too), and the loop pushes that
+# harness tag first. Before it builds, the check confirms that
 # the harness version the tagged go.mod requires has its tag, a release's a
 # release, so a missing harness tag fails with a message and not in go
 # install. A pre-release is published as a GitHub pre-release that is never

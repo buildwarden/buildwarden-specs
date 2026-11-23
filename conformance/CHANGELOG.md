@@ -17,10 +17,15 @@ line of `go.work` to it.
   release's is a release.
 - `speccheck release -program` (the Makefile's `PROGRAM`, which `ci` sets on
   `program/**`) holds a program trunk's change to the next minor after each
-  changed directory's newest release, and lets a specification require a
-  pre-release of the harness's head; `speccheck modules` accepts `go.work`
-  replace lines at such pre-releases and requires one for each a `go.mod`
-  requires.
+  changed directory's newest release, and a changed specification, while
+  the harness's head is unreleased, to the pre-release of it the tree's
+  harness is: its newest tag, or the next `-dev` tag when the change touches
+  the harness. `speccheck modules` accepts a `go.work` replace line at a
+  pre-release of the harness's head only when a `go.mod` requires it, and
+  requires one for each a `go.mod` requires.
+- `speccheck release` measures a changed directory's head against its newest
+  release, not its newest tag, so a program trunk's pre-release tags do not
+  stop `main` from releasing a patch or a minor below them.
 
 ## v0.1.0
 

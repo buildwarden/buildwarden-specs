@@ -70,8 +70,12 @@ check-tidy:
 # newest tag, and a changed specification's go.mod names the harness version
 # at the head of conformance/CHANGELOG.md. With PROGRAM, a program trunk's
 # change heads a changed directory with the next minor after its newest
-# release, the version the loop's pre-release tags are of, and a
-# specification may name a pre-release of the harness's head instead. The
+# release, the version the loop's pre-release tags are of, and a changed
+# specification names, unless the harness's head is released, the
+# pre-release of it the tree's harness is: its newest tag, or, when the
+# change touches the harness, the next -dev tag wf tag-next pushes. The
+# newest-tag rule counts releases only, so main's patches may stay below a
+# program's pre-releases. The
 # change is measured from the merge base of BASE and HEAD, so the history and
 # the tags must be there.
 check-release:

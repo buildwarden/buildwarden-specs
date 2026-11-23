@@ -210,13 +210,22 @@ new release of the directory at fault.
   other suffix is refused. Only a program trunk's pins may name a
   pre-release.
 - **A specification's go.mod on a program trunk** requires the harness at
-  the head of `conformance/CHANGELOG.md` or at a pre-release of it,
-  `conformance vX.Y.Z-dev.N` or `-rc.N`, since there the harness's head has
-  only pre-release tags and `go install` resolves the version the `go.mod`
-  requires; `go.work` then replaces that version by `./conformance` too.
-  The harness's tag is pushed first, and the `release` workflow confirms the
-  required harness version is tagged before it builds (a release's must be a
-  release). On `main`, a specification requires the harness's release.
+  the head of `conformance/CHANGELOG.md` when that is released. When it is
+  not, the harness's head has only pre-release tags and `go install`
+  resolves the version the `go.mod` requires, so a changed specification
+  requires the pre-release the tree's harness is: the harness's newest
+  pre-release of its head, `conformance vX.Y.Z-dev.N` or `-rc.N`, or, when
+  the same change touches the harness, the next `-dev` tag `wf tag-next`
+  pushes for it at that merge (`make check-release PROGRAM=1` checks which).
+  `go.work` then replaces that version by `./conformance` too, and a replace
+  line at a pre-release no `go.mod` requires is refused. The harness's tag
+  is pushed first, and the `release` workflow confirms the required harness
+  version is tagged before it builds (a release's must be a release). On
+  `main`, a specification requires the harness's release.
+- **Main's releases ignore the pre-releases.** A change on `main` heads a
+  directory above its newest release, not its newest tag, so it may still
+  release a patch or a minor below the version a program trunk's
+  pre-releases are of.
 - **Tags are pushed one to a push,** because a push of more than three tags
   starts no workflow run. A run that was missed or that failed is made again
   by hand, `release` with the existing tag as its input, without touching

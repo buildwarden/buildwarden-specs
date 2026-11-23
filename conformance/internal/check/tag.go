@@ -66,6 +66,33 @@ func NextRelease(versions []string) string {
 	return fmt.Sprintf("v%s.%d.0", m[1], minor+1)
 }
 
+// PrereleasesOf returns the versions that are pre-releases of the release
+// r, vX.Y.Z-dev.N or -rc.N.
+func PrereleasesOf(versions []string, r string) []string {
+	var out []string
+	for _, v := range versions {
+		if of, ok := PrereleaseOf(v); ok && of == r {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// NextPre is the next pre-release of the kind, dev or rc, of the release r,
+// given the versions of the directory's tags: r-kind.N, N one more than the
+// highest of that kind and release, or 1. It is the tag wf tag-next proposes
+// (its nextPre) when r is NextRelease of the tags.
+func NextPre(versions []string, r, kind string) string {
+	n := 0
+	for _, v := range versions {
+		rest, ok := strings.CutPrefix(v, r+"-"+kind+".")
+		if k, err := strconv.Atoi(rest); ok && err == nil && k > n {
+			n = k
+		}
+	}
+	return fmt.Sprintf("%s-%s.%d", r, kind, n+1)
+}
+
 // Tagged is what a tag names, once Tag has checked it.
 type Tagged struct {
 	// Dir is the directory: the harness's, or a specification's.

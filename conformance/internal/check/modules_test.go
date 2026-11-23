@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"testing"
 	"testing/fstest"
 )
@@ -57,7 +58,15 @@ func TestModules(t *testing.T) {
 				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.2.0-dev.3")(fsys)
 			}},
 		{name: "go.work replacing a pre-release of the head no go.mod requires",
-			change: replace("go.work", "replace ", "replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0-rc.1 => ./conformance\nreplace ")},
+			change:  replace("go.work", "replace ", "replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0-rc.1 => ./conformance\nreplace "),
+			wantErr: []string{"go.work: replaces the harness at v0.2.0-rc.1, a pre-release no specification's go.mod requires: drop the stray line"}},
+		{name: "go.work keeping a pre-release line once the go.mod requires the release",
+			change: func(fsys fstest.MapFS) {
+				replace("go.work", "replace ", "replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0-dev.3 => ./conformance\nreplace ")(fsys)
+				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.2.0-rc.1")(fsys)
+				replace("go.work", "replace ", "replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0-rc.1 => ./conformance\nreplace ")(fsys)
+			},
+			wantErr: []string{"go.work: replaces the harness at v0.2.0-dev.3, a pre-release no specification's go.mod requires"}},
 		{name: "go.work replacing a pre-release of another version",
 			change:  replace("go.work", "replace ", "replace github.com/buildwarden/buildwarden-specs/conformance v0.1.0-dev.1 => ./conformance\nreplace "),
 			wantErr: []string{`go.work: replaces the harness at "v0.1.0-dev.1", and the head of conformance/CHANGELOG.md is v0.2.0: the harness is replaced at that version and its pre-releases only`}},
@@ -86,6 +95,15 @@ func TestModules(t *testing.T) {
 // after a release v0.2.x, as a program trunk's change does.
 func atMinor(fsys fstest.MapFS) {
 	replace("relay-claim/CHANGELOG.md", "## v0.3.1\n\n", "")(fsys)
+}
+
+// atHarnessDev is atMinor with relay-claim's go.mod requiring the harness
+// at v0.2.0-dev.n, a pre-release of its head.
+func atHarnessDev(n int) func(fstest.MapFS) {
+	return func(fsys fstest.MapFS) {
+		atMinor(fsys)
+		replace("relay-claim/go.mod", "conformance v0.2.0", fmt.Sprintf("conformance v0.2.0-dev.%d", n))(fsys)
+	}
 }
 
 func TestRelease(t *testing.T) {
@@ -126,11 +144,17 @@ func TestRelease(t *testing.T) {
 			change:  replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.2.0-dev.1"),
 			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.2.0-dev.1", a pre-release, and the head of conformance/CHANGELOG.md is v0.2.0: only a program trunk's specification requires a pre-release of the harness`}},
 
+		{name: "a patch on main below a program trunk's pre-release passes", dirs: changed("v0.3.0", "v0.4.0-dev.1")},
+		{name: "a patch on main below its newest release", dirs: changed("v0.3.0", "v0.4.0", "v0.4.0-dev.1"),
+			wantErr: []string{"names v0.3.1 at its head, and relay-claim/v0.4.0 is already tagged"}},
+
 		// A program trunk's change: each changed directory's head is the
 		// next minor after its newest release, as wf tag-next proposes, and
-		// a specification may require a pre-release of the harness's head.
+		// a specification requires the pre-release of the harness's head
+		// that the tree's harness is. In changed(), the harness changes and
+		// its head, v0.2.0, has no tag, so that is v0.2.0-dev.1.
 		{name: "a program trunk's change at the next minors", program: true, dirs: changed("v0.2.0", "v0.2.3", "v0.3.0-dev.4"),
-			change: atMinor},
+			change: atHarnessDev(1)},
 		{name: "a program trunk's change to directories with no release", program: true,
 			change: func(fsys fstest.MapFS) {
 				replace("relay-claim/CHANGELOG.md", "## v0.3.1", "## v0.1.0")(fsys)
@@ -138,24 +162,43 @@ func TestRelease(t *testing.T) {
 				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.1.0-dev.2")(fsys)
 			},
 			dirs: []DirRelease{{Dir: Harness, Changed: true, Tags: []string{"v0.1.0-dev.1"}}, {Dir: "relay-claim", Changed: true}}},
-		{name: "a program trunk's specification requiring a -dev pre-release of the harness's head", program: true, dirs: changed("v0.2.0"),
-			change: func(fsys fstest.MapFS) {
-				atMinor(fsys)
-				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.2.0-dev.1")(fsys)
-			}},
-		{name: "a program trunk's specification requiring an -rc pre-release of the harness's head", program: true, dirs: changed("v0.2.0"),
+		{name: "a program trunk's specification requiring the harness's next -dev tag", program: true,
+			dirs:   []DirRelease{{Dir: Harness, Changed: true, Tags: []string{"v0.1.0", "v0.2.0-dev.1", "v0.2.0-dev.2", "v0.2.0-rc.1"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
+			change: atHarnessDev(3)},
+		{name: "a program trunk's specification guessing the harness's next -dev tag wrong", program: true,
+			dirs:    []DirRelease{{Dir: Harness, Changed: true, Tags: []string{"v0.1.0", "v0.2.0-dev.1", "v0.2.0-dev.2"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
+			change:  atHarnessDev(2),
+			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.2.0-dev.2", and the head of conformance/CHANGELOG.md is v0.2.0: a program trunk's specification requires v0.2.0-dev.3, the -dev tag wf tag-next pushes for the harness this change touches`}},
+		{name: "a program trunk's specification requiring the harness's newest pre-release", program: true,
+			dirs: []DirRelease{{Dir: Harness, Tags: []string{"v0.1.0", "v0.2.0-dev.4", "v0.2.0-rc.3"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
 			change: func(fsys fstest.MapFS) {
 				atMinor(fsys)
 				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.2.0-rc.3")(fsys)
 			}},
-		{name: "a program trunk's specification requiring the harness's head", program: true, dirs: changed("v0.2.0"),
+		{name: "a program trunk's specification requiring a stale pre-release of the harness", program: true,
+			dirs:    []DirRelease{{Dir: Harness, Tags: []string{"v0.1.0", "v0.2.0-dev.1", "v0.2.0-dev.3"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
+			change:  atHarnessDev(1),
+			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.2.0-dev.1", and the head of conformance/CHANGELOG.md is v0.2.0: a program trunk's specification requires v0.2.0-dev.3, the harness's newest pre-release of its head`}},
+		{name: "a program trunk's specification requiring the harness's unreleased head", program: true, dirs: changed("v0.2.0"),
+			change:  atMinor,
+			wantErr: []string{"relay-claim/go.mod: requires the harness at v0.2.0, the head of conformance/CHANGELOG.md, which has no release tag: a program trunk's specification requires v0.2.0-dev.1"}},
+		{name: "a program trunk's specification when the harness's head has no tag", program: true,
+			dirs:    []DirRelease{{Dir: Harness, Tags: []string{"v0.1.0"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
+			change:  atHarnessDev(1),
+			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.2.0-dev.1", and the head of conformance/CHANGELOG.md, v0.2.0, is neither released nor tagged as a pre-release`}},
+		{name: "a program trunk's specification requiring the harness's released head", program: true,
+			dirs:   []DirRelease{{Dir: Harness, Tags: []string{"v0.2.0", "v0.2.0-dev.1"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
 			change: atMinor},
+		{name: "a program trunk's specification requiring a pre-release of the harness's released head", program: true,
+			dirs:    []DirRelease{{Dir: Harness, Tags: []string{"v0.2.0", "v0.2.0-dev.1"}}, {Dir: "relay-claim", Changed: true, Tags: []string{"v0.2.0"}}},
+			change:  atHarnessDev(1),
+			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.2.0-dev.1", and the head of conformance/CHANGELOG.md is v0.2.0, which is released: a program trunk's specification requires it`}},
 		{name: "a program trunk's specification requiring a pre-release of another harness version", program: true, dirs: changed("v0.2.0"),
 			change: func(fsys fstest.MapFS) {
 				atMinor(fsys)
 				replace("relay-claim/go.mod", "conformance v0.2.0", "conformance v0.1.0-dev.1")(fsys)
 			},
-			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.1.0-dev.1", and the head of conformance/CHANGELOG.md is v0.2.0: a program trunk's specification requires v0.2.0 or a pre-release of it`}},
+			wantErr: []string{`relay-claim/go.mod: requires the harness at "v0.1.0-dev.1", and the head of conformance/CHANGELOG.md is v0.2.0: a program trunk's specification requires v0.2.0-dev.1`}},
 		{name: "a program trunk's change heading a patch", program: true, dirs: changed("v0.3.0"),
 			wantErr: []string{"relay-claim/CHANGELOG.md: names v0.3.1 at its head, and a program trunk's change to relay-claim heads it with v0.4.0, the next minor after its newest release"}},
 		{name: "a program trunk's change skipping a minor", program: true,
@@ -205,6 +248,22 @@ func TestNextRelease(t *testing.T) {
 	} {
 		if got := NextRelease(tt.in); got != tt.want {
 			t.Errorf("NextRelease(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestNextPre(t *testing.T) {
+	for _, tt := range []struct {
+		in   []string
+		kind string
+		want string
+	}{
+		{nil, "dev", "v0.2.0-dev.1"},
+		{[]string{"v0.1.0", "v0.2.0-dev.1", "v0.2.0-dev.10", "v0.2.0-rc.4", "v0.3.0-dev.20"}, "dev", "v0.2.0-dev.11"},
+		{[]string{"v0.2.0-dev.3", "v0.2.0-rc.4"}, "rc", "v0.2.0-rc.5"},
+	} {
+		if got := NextPre(tt.in, "v0.2.0", tt.kind); got != tt.want {
+			t.Errorf("NextPre(%q, v0.2.0, %s) = %q, want %q", tt.in, tt.kind, got, tt.want)
 		}
 	}
 }
