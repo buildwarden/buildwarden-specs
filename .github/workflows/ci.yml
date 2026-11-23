@@ -4,9 +4,9 @@ name: ci
 # workflow runs.
 on:
   push:
-    branches: [main]
+    branches: [main, 'program/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'program/**']
 
 permissions:
   contents: read
