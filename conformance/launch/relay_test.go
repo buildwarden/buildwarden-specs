@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/attach"
 	"github.com/buildwarden/buildwarden-specs/conformance/sandbox"
@@ -182,5 +183,113 @@ func TestStartToken(t *testing.T) {
 	in := &relayInstance{f: f}
 	if err := in.start(context.Background(), attach.Params{NoClaimToken: true}); err == nil || !strings.Contains(err.Error(), "requires {token}") {
 		t.Errorf("start without a token: %v", err)
+	}
+}
+
+// fakeInspect writes a runtime whose inspect of a container's process ID
+// answers, call by call, with each of answers in turn and then with the last
+// one: "-" for no such container, any other text as the process ID. Its
+// inspect of the container's state prints state. It counts its calls in
+// counter, so that its answers follow the calls and not the clock.
+func fakeInspect(t *testing.T, state string, answers ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	rt := filepath.Join(dir, "docker")
+	script := "#!/bin/sh\n" +
+		"if [ \"$3\" = '{{json .State}}' ]; then echo '" + state + "'; exit 0; fi\n" +
+		"n=$(cat '" + dir + "/count' 2>/dev/null || echo 0); n=$((n+1)); echo $n > '" + dir + "/count'\n" +
+		"case $n in\n"
+	for i, a := range answers {
+		pat := strconv.Itoa(i + 1)
+		if i == len(answers)-1 {
+			pat = "*"
+		}
+		if a == "-" {
+			script += pat + ") echo 'Error: No such object: n' >&2; exit 1;;\n"
+		} else {
+			script += pat + ") echo '" + a + "';;\n"
+		}
+	}
+	script += "esac\n"
+	if err := os.WriteFile(rt, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return rt
+}
+
+// TestContainerPID drives containerPID with a fake runtime: the bound it is
+// given, the phases it records, and the message of each failure, which says
+// that the runtime, not the relay, did not get as far as running.
+func TestContainerPID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the runtime's script is a shell script")
+	}
+	// The runtime has a target's own command's bound, longer than the
+	// relay's own, which runs from when the container is running.
+	if containerLimit != CommandLimit || containerLimit <= sandbox.StartLimit {
+		t.Errorf("containerLimit %s, want CommandLimit %s, beyond sandbox.StartLimit %s", containerLimit, CommandLimit, sandbox.StartLimit)
+	}
+	f := parse(t, ociRelay)
+	never := "the relay under test was never running"
+	tests := []struct {
+		name    string
+		answers []string
+		exited  bool
+		pid     int
+		listed  bool
+		wantErr string
+	}{
+		{name: "running after a delay", answers: []string{"-", "-", "0", "0", "4242"}, pid: 4242, listed: true},
+		{name: "never listed", answers: []string{"-"}, wantErr: "the runtime docker did not start the container n within 300ms: " + never},
+		{name: "listed, no process", answers: []string{"-", "0"}, listed: true, wantErr: "the runtime docker did not start the container n within 300ms: " + never},
+		{name: "run exited", answers: []string{"-"}, exited: true, wantErr: "docker run n exited before the container was running: " + never},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rt := fakeInspect(t, "{}", tt.answers...)
+			in := &relayInstance{f: f, done: make(chan struct{})}
+			if tt.exited {
+				close(in.done)
+			}
+			ph := ociPhases{run: time.Now()}
+			limit := 300 * time.Millisecond
+			if tt.wantErr == "" {
+				limit = time.Minute
+			}
+			pid, err := in.containerPID(context.Background(), rt, "n", limit, &ph)
+			switch {
+			case tt.wantErr == "" && (err != nil || pid != tt.pid):
+				t.Fatalf("containerPID = %d, %v; want %d", pid, err, tt.pid)
+			case tt.wantErr != "" && (err == nil || err.Error() != tt.wantErr):
+				t.Fatalf("containerPID = %d, %v; want the error %q", pid, err, tt.wantErr)
+			}
+			if got := !ph.listed.IsZero(); got != tt.listed {
+				t.Errorf("listed recorded %v, want %v", got, tt.listed)
+			}
+			if got := !ph.running.IsZero(); got != (tt.pid > 0) {
+				t.Errorf("running recorded %v, want %v", got, tt.pid > 0)
+			}
+			if tt.pid > 0 && (ph.listed.Before(ph.run) || ph.running.Before(ph.listed)) {
+				t.Errorf("phases out of order: %+v", ph)
+			}
+		})
+	}
+}
+
+// TestOCIStartReport checks what a failed oci start prints of its phases and
+// of the runtime's state.
+func TestOCIStartReport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the runtime's script is a shell script")
+	}
+	run := time.Date(2026, 11, 22, 19, 57, 12, 0, time.UTC)
+	ph := ociPhases{run: run, listed: run.Add(1200 * time.Millisecond), running: run.Add(29 * time.Second)}
+	want := "run started at 19:57:12.000; inspect first returned the container after 1.2s; the container had a process after 29s; the claim endpoint answered not reached"
+	if got := ph.String(); got != want {
+		t.Errorf("phases\n%s\nwant\n%s", got, want)
+	}
+	state := `{"Status":"created","Running":false,"Pid":0}`
+	if got := ociState(fakeInspect(t, state, "-"), "n"); got != state {
+		t.Errorf("ociState = %q, want %q", got, state)
 	}
 }
