@@ -231,6 +231,7 @@ func TestContainerPID(t *testing.T) {
 	}
 	f := parse(t, ociRelay)
 	never := "the relay under test was never running"
+	timedOut := "the runtime docker did not start the container n within 1m0s: " + never
 	tests := []struct {
 		name    string
 		answers []string
@@ -240,8 +241,8 @@ func TestContainerPID(t *testing.T) {
 		wantErr string
 	}{
 		{name: "running after a delay", answers: []string{"-", "-", "0", "0", "4242"}, pid: 4242, listed: true},
-		{name: "never listed", answers: []string{"-"}, wantErr: "the runtime docker did not start the container n within 300ms: " + never},
-		{name: "listed, no process", answers: []string{"-", "0"}, listed: true, wantErr: "the runtime docker did not start the container n within 300ms: " + never},
+		{name: "never listed", answers: []string{"-"}, wantErr: timedOut},
+		{name: "listed, no process", answers: []string{"-", "0"}, listed: true, wantErr: timedOut},
 		{name: "run exited", answers: []string{"-"}, exited: true, wantErr: "docker run n exited before the container was running: " + never},
 	}
 	for _, tt := range tests {
@@ -251,12 +252,24 @@ func TestContainerPID(t *testing.T) {
 			if tt.exited {
 				close(in.done)
 			}
-			ph := ociPhases{run: time.Now()}
-			limit := 300 * time.Millisecond
-			if tt.wantErr == "" {
-				limit = time.Minute
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// A timeout case stands for the limit running out by cancelling
+			// once every answer has been given, so that its outcome follows
+			// the fake's calls and the one-minute limit is only a failure bound.
+			var fired <-chan struct{}
+			if tt.wantErr != "" && !tt.exited {
+				fired = cancelPastAnswers(ctx, cancel, rt, len(tt.answers))
 			}
-			pid, err := in.containerPID(context.Background(), rt, "n", limit, &ph)
+			ph := ociPhases{run: time.Now()}
+			pid, err := in.containerPID(ctx, rt, "n", time.Minute, &ph)
+			if fired != nil {
+				select {
+				case <-fired:
+				default:
+					t.Fatalf("containerPID = %d, %v before the fake gave all of %q", pid, err, tt.answers)
+				}
+			}
 			switch {
 			case tt.wantErr == "" && (err != nil || pid != tt.pid):
 				t.Fatalf("containerPID = %d, %v; want %d", pid, err, tt.pid)
@@ -274,6 +287,28 @@ func TestContainerPID(t *testing.T) {
 			}
 		})
 	}
+}
+
+// cancelPastAnswers calls cancel once the fake runtime rt has been called
+// for more than n inspects, and closes the channel it returns when it has.
+// It waits for the call after the n-th, not the n-th itself: containerPID
+// inspects one call at a time, so only then has it taken in the n-th
+// answer, which a cancel during that call would kill unread.
+func cancelPastAnswers(ctx context.Context, cancel context.CancelFunc, rt string, n int) <-chan struct{} {
+	fired := make(chan struct{})
+	count := filepath.Join(filepath.Dir(rt), "count")
+	go func() {
+		for ctx.Err() == nil {
+			b, _ := os.ReadFile(count)
+			if c, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && c > n {
+				close(fired)
+				cancel()
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	return fired
 }
 
 // TestOCIStartReport checks what a failed oci start prints of its phases and
