@@ -195,6 +195,18 @@ const captureQueue = 64
 // service by them: the capture of a relay on a frame link, which accepts
 // connections to any address and port (relay-guest-api, GUEST-6).
 func (st *Stack) Capture(handle func(net.Conn)) {
+	// No TIME-WAIT. A SYN that reuses the 4-tuple of a connection in
+	// TIME-WAIT is handed by gVisor only to a listening endpoint, never to
+	// a forwarder, so with its default of 60 s a peer that picks a source
+	// port again would be ignored for a minute, though GUEST-6 has the
+	// connection accepted. TIME-WAIT guards against a delayed segment of the
+	// old connection on a path that reorders; a frame link delivers in
+	// order, so it buys nothing here.
+	tw := tcpip.TCPTimeWaitTimeoutOption(0)
+	if e := st.s.SetTransportProtocolOption(tcp.ProtocolNumber, &tw); e != nil {
+		// New registers TCP, whose protocol takes the option.
+		panic(fmt.Sprintf("netstack: set TCP's TIME-WAIT timeout: %s", e))
+	}
 	fwd := tcp.NewForwarder(st.s, 0, captureQueue, func(r *tcp.ForwarderRequest) {
 		var wq waiter.Queue
 		ep, e := r.CreateEndpoint(&wq)
