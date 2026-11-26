@@ -3,12 +3,20 @@ package netstack
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
 	"strings"
 	"testing"
 	"time"
+
+	"gvisor.dev/gvisor/pkg/tcpip"
+	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
+	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
+	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
+	"gvisor.dev/gvisor/pkg/waiter"
 
 	"github.com/buildwarden/buildwarden-specs/conformance/memnet"
 )
@@ -319,4 +327,90 @@ func TestCaptureTakesAnyAddressAndPort(t *testing.T) {
 			t.Errorf("%s: read %q, %v; want %q", addr, got, err, want)
 		}
 	}
+}
+
+// TestCaptureTakesAReusedSourcePort connects twice from one source port to a
+// captured address and port, the capturing end closing first each time. The
+// second connection reuses the first's 4-tuple, which a capturing stack that
+// kept its end of the first in TIME-WAIT would drop for gVisor's 60 s
+// (relay-guest-api, GUEST-6). The fixed port stands for the build
+// environment's random choice landing on one it used before.
+func TestCaptureTakesAReusedSourcePort(t *testing.T) {
+	t.Parallel()
+	ea, eb := memnet.Frames()
+	a, err := New(ea, Config{MAC: macA, Address: netip.MustParsePrefix("10.0.0.1/24"), AnyAddress: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	b, err := New(eb, Config{MAC: macB, Address: netip.MustParsePrefix("10.0.0.2/24"), Gateway: netip.MustParseAddr("10.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	a.Capture(func(c net.Conn) {
+		_, _ = c.Write([]byte("captured"))
+		_ = c.Close()
+	})
+	local := tcpip.FullAddress{NIC: nic, Addr: tcpip.AddrFrom4([4]byte{10, 0, 0, 2}), Port: 40000}
+	remote := tcpip.FullAddress{NIC: nic, Addr: tcpip.AddrFrom4([4]byte{10, 0, 0, 1}), Port: 80}
+	for i := range 2 {
+		// The bound of a case's dial (within); the connection takes
+		// milliseconds when it is taken at all.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := connectFrom(ctx, b, local, remote, "captured")
+		cancel()
+		if err != nil {
+			t.Fatalf("connection %d from port %d: %v", i+1, local.Port, err)
+		}
+	}
+}
+
+// connectFrom connects st from local to remote, reads until the peer
+// closes, requires what it read to be want, closes, and returns once its own
+// end is closed and so no longer holds the 4-tuple, as a guest's socket that
+// closed second does.
+func connectFrom(ctx context.Context, st *Stack, local, remote tcpip.FullAddress, want string) error {
+	var wq waiter.Queue
+	ep, e := st.s.NewEndpoint(tcp.ProtocolNumber, ipv4.ProtocolNumber, &wq)
+	if e != nil {
+		return errors.New(e.String())
+	}
+	entry, writable := waiter.NewChannelEntry(waiter.WritableEvents)
+	wq.EventRegister(&entry)
+	if e := ep.Bind(local); e != nil {
+		ep.Close()
+		return fmt.Errorf("bind: %s", e)
+	}
+	e = ep.Connect(remote)
+	if _, started := e.(*tcpip.ErrConnectStarted); started {
+		select {
+		case <-ctx.Done():
+			ep.Close()
+			return ctx.Err()
+		case <-writable:
+		}
+		e = ep.LastError()
+	}
+	wq.EventUnregister(&entry)
+	if e != nil {
+		ep.Close()
+		return fmt.Errorf("connect: %s", e)
+	}
+	c := gonet.NewTCPConn(&wq, ep)
+	got, err := io.ReadAll(c)
+	_ = c.Close()
+	if err != nil || string(got) != want {
+		return fmt.Errorf("read %q, %v; want %q", got, err, want)
+	}
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for tcp.EndpointState(ep.State()) != tcp.StateClose {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("its own end did not close: %s", tcp.EndpointState(ep.State()))
+		case <-tick.C:
+		}
+	}
+	return nil
 }

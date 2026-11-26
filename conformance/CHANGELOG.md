@@ -5,6 +5,24 @@ The harness the six specifications' suites share, released as the tags
 directory adds the version it will be released as, and raises the `replace`
 line of `go.work` to it.
 
+## v0.2.1
+
+- A capturing stack, `netstack.Stack.Capture` (the in-process relay's),
+  keeps no TCP TIME-WAIT. gVisor hands a SYN that reuses the 4-tuple of a
+  connection in TIME-WAIT only to a listening endpoint, never to a
+  forwarder, so the in-process relay ignored a reconnection from a source
+  port the build environment had used before for 60 s, against GUEST-6, and
+  a case's dial gave up at its 10 s. A stack that only dials keeps gVisor's
+  default.
+- The oci launcher bounds the runtime's start of a relay's container by
+  `CommandLimit` (60 s), the bound of a target's own command, not the
+  relay's `sandbox.StartLimit`, which still runs from when the container is
+  running; that failure says the runtime did not start the container and
+  the relay under test was never running. Each oci start records when the
+  runtime's run started, when inspect first returned the container, when it
+  had a process and when the claim endpoint answered, and a failed start
+  prints them with the runtime's inspect state of the container.
+
 ## v0.2.0
 
 - The `release` workflow's check of the tag it releases, `speccheck tag`,

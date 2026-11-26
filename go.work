@@ -20,4 +20,4 @@ use (
 // vX.Y.Z-dev.N or -rc.N, and go.work then has a second line like this one at
 // that version, since a workspace module is replaced at a version only; ci
 // refuses such a line once no go.mod requires it.
-replace github.com/buildwarden/buildwarden-specs/conformance v0.2.0 => ./conformance
+replace github.com/buildwarden/buildwarden-specs/conformance v0.2.1 => ./conformance
